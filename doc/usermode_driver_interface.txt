@@ -1,0 +1,44 @@
+Overall the basic interface between the usermode code and the driver
+should be fairly limited.  The main responsibility of the usermode code
+is to store and retrieve logs when recording and replaying.  However,
+there is some setup that needs to happen:
+
+Entries that begin with a * are calls to the replay driver.
+
+Logging process:
+
+*1) create a replay sphere. This is done by opening /dev/replayX where
+    X is the number of the replay sphere.  It will return the fd on
+    success, or -EBUSY if other software is already using the sphere.
+
+2) fork child
+
+*3) IN CHILD: set mode to "recording" by issuing an IOCTL to the open
+ replay driver fd
+
+4) IN CHILD: execute execve
+
+5) IN PARENT: read from the open replay fd and save this data.  When
+the replay sphere is done the read system call will return 0.
+
+Replay process:
+
+1) Open log, read off the first entry, it should be an execve_entry
+   entry.  Use these arguments to execve a child process that we will
+   record.
+
+*2) create a replay sphere. This is done by opening /dev/replayX
+   where X is the number of the replay sphere.  It will return the fd
+   on success, or -EBUSY if other software is already using the
+   sphere.
+
+3) fork child
+
+*4) IN CHILD: set mode to "replaying" by issuing an IOCTL to the open
+ replay driver fd.
+
+4) IN CHILD: execute execve using arguments from the replay log
+
+*5) IN PARENT: read from the open log file and write the data to the
+ open replay fd until the log is empty.
+

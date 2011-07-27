@@ -46,6 +46,7 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static int __init replay_init(void) {
         int ret;
+        struct device *dev;
 
         memset(&replay_fops, 0, sizeof(replay_fops));
         replay_fops.read = replay_read;
@@ -60,8 +61,12 @@ static int __init replay_init(void) {
         if(IS_ERR(replay_class)) {
                 printk(KERN_ERR "could not create replay class.\n");
         } else {
-                device_create(replay_class, NULL, MKDEV(replay_major, 0), NULL, "replay");
-                printk(KERN_INFO "replay: version %s, Sam King\n", REPLAY_VERSION);
+                dev = device_create(replay_class, NULL, MKDEV(replay_major, 0), NULL, "replay");
+                if(IS_ERR(dev)) {
+                        printk(KERN_CRIT "************* replay module could not create device\n");
+                } else {
+                        printk(KERN_INFO "************* replay: version %s, Sam King, replay_major = %d\n", REPLAY_VERSION, replay_major);
+                }
         }
 
         ret = register_trace_sys_enter(replay_syscall_enter, NULL);

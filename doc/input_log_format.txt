@@ -1,0 +1,24 @@
+header:
+
+<u32 type><u32 threadId><struct pt_regs regs>
+
+string:
+<u32 len><u8 c>*len
+
+execve_enter_entry:
+
+<header><i32 argc><i32 envc><string fileName><string argv>*argc
+    <string envp>*envc
+
+syscall_enter_entry, syscall_exit_entry, instruction_entry,
+thread_create_entry, thread_exit_entry:
+
+<header>
+
+copy_to_user_entry:
+
+<header><string copyData>
+
+signal_entry:
+
+TBD
