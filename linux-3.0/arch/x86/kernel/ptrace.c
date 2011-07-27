@@ -1359,6 +1359,11 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs,
 # define IS_IA32	0
 #endif
 
+#ifdef CONFIG_RECORD_REPLAY
+void replay_syscall_enter(struct pt_regs *regs);
+void replay_syscall_exit(struct pt_regs *regs);
+#endif
+
 /*
  * We must return the syscall number to actually look up in the table.
  * This can be -1L to skip running any syscall at all.
@@ -1404,6 +1409,10 @@ long syscall_trace_enter(struct pt_regs *regs)
 					    regs->dx, regs->r10);
 #endif
 	}
+        
+#ifdef CONFIG_RECORD_REPLAY
+        replay_syscall_enter(regs);
+#endif
 
 	return ret ?: regs->orig_ax;
 }
@@ -1428,4 +1437,10 @@ void syscall_trace_leave(struct pt_regs *regs)
 			!test_thread_flag(TIF_SYSCALL_EMU);
 	if (step || test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, step);
+
+#ifdef CONFIG_RECORD_REPLAY
+        replay_syscall_exit(regs);
+#endif
+
 }
+
