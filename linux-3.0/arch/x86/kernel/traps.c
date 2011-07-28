@@ -256,6 +256,10 @@ dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code)
 }
 #endif
 
+#ifdef CONFIG_RECORD_REPLAY
+int replay_general_protection(struct pt_regs *regs);
+#endif
+
 dotraplinkage void __kprobes
 do_general_protection(struct pt_regs *regs, long error_code)
 {
@@ -271,6 +275,14 @@ do_general_protection(struct pt_regs *regs, long error_code)
 	tsk = current;
 	if (!user_mode(regs))
 		goto gp_in_kernel;
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_thread_flag(TIF_RECORD_REPLAY)) {
+                if(replay_general_protection(regs)) {
+                        return;
+                }
+        }
+#endif
 
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_no = 13;

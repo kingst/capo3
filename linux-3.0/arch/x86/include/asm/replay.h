@@ -8,7 +8,8 @@
 #define REPLAY_IOC_RESET_SPHERE    _IO(REPLAY_IOC_MAGIC, 2)
 
 typedef enum {invalid_event=0, execve_event, syscall_enter_event, 
-              syscall_exit_event, thread_create_event, thread_exit_event} replay_event_t;
+              syscall_exit_event, thread_create_event, thread_exit_event,
+              instruction_event} replay_event_t;
 
 struct replay_sphere;
 
