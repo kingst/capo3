@@ -483,6 +483,7 @@ int replay_general_protection(struct pt_regs *regs) {
 void replay_copy_to_user(unsigned long to_addr, void *buf, int len) {
         replay_sphere_t *sphere;
         int ret;
+        unsigned long flags;
 
         if(current->rtcb == NULL)
                 BUG();
@@ -495,16 +496,16 @@ void replay_copy_to_user(unsigned long to_addr, void *buf, int len) {
         if(to_addr > PAGE_OFFSET)
                 return;
 
-        spin_lock(&sphere->lock);
+        spin_lock_irqsave(&sphere->lock, flags);
         ret = record_header_locked(sphere, copy_to_user_event,
                                    current->rtcb->thread_id, task_pt_regs(current));
         if(ret) {
-                spin_unlock(&sphere->lock);
+                spin_unlock_irqrestore(&sphere->lock, flags);
                 BUG();
                 return;
         }
         ret = record_buffer_locked(sphere, to_addr, buf, len);
-        spin_unlock(&sphere->lock);
+        spin_unlock_irqrestore(&sphere->lock, flags);
 
         if(ret)
                 BUG();
