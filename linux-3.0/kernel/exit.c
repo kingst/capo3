@@ -899,6 +899,10 @@ static void check_stack_usage(void)
 static inline void check_stack_usage(void) {}
 #endif
 
+#ifdef CONFIG_RECORD_REPLAY
+void replay_thread_exit(struct pt_regs *regs);
+#endif
+
 NORET_TYPE void do_exit(long code)
 {
 	struct task_struct *tsk = current;
@@ -924,6 +928,11 @@ NORET_TYPE void do_exit(long code)
 	set_fs(USER_DS);
 
 	tracehook_report_exit(&code);
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_thread_flag(TIF_RECORD_REPLAY))
+                replay_thread_exit(task_pt_regs(tsk));
+#endif
 
 	validate_creds_for_do_exit(tsk);
 

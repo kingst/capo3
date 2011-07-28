@@ -7,18 +7,22 @@ Entries that begin with a * are calls to the replay driver.
 
 Logging process:
 
-*1) create a replay sphere. This is done by opening /dev/replayX where
+1) log the execve arguments passed into the command line
+
+*2) create a replay sphere. This is done by opening /dev/replayX where
     X is the number of the replay sphere.  It will return the fd on
     success, or -EBUSY if other software is already using the sphere.
+    The logging process has to reset the state of the replay sphere
+    before it can begin logging.
 
-2) fork child
+3) fork child
 
-*3) IN CHILD: set mode to "recording" by issuing an IOCTL to the open
+*4) IN CHILD: set mode to "recording" by issuing an IOCTL to the open
  replay driver fd
 
-4) IN CHILD: execute execve
+5) IN CHILD: execute execve
 
-5) IN PARENT: read from the open replay fd and save this data.  When
+6) IN PARENT: read from the open replay fd and save this data.  When
 the replay sphere is done the read system call will return 0.
 
 Replay process:
@@ -27,10 +31,11 @@ Replay process:
    entry.  Use these arguments to execve a child process that we will
    record.
 
-*2) create a replay sphere. This is done by opening /dev/replayX
-   where X is the number of the replay sphere.  It will return the fd
-   on success, or -EBUSY if other software is already using the
-   sphere.
+*2) create a replay sphere. This is done by opening /dev/replayX where
+   X is the number of the replay sphere.  It will return the fd on
+   success, or -EBUSY if other software is already using the sphere.
+   The replay process has to reset the state of the replay sphere
+   before it can begin replaying.
 
 3) fork child
 

@@ -4,6 +4,7 @@
 
 void startRecording(int replayFd) {
     int ret = ioctl(replayFd, REPLAY_IOC_START_RECORDING, 0);
+    assert(ret == 0);
 }
 
 pid_t startChild(int replayFd, char *argv[], char *envp[]) {

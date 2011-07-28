@@ -3,7 +3,7 @@ EXE = record replay
 all: $(EXE)
 
 CC = g++
-CFLAGS = -g -W -Wall
+CFLAGS = -g -W -Wall -I ../linux-3.0/arch/x86/include
 LDFLAGS = -static
 
 SHARED_OBJS = util.o

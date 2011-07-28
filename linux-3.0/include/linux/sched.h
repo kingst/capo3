@@ -1217,6 +1217,14 @@ enum perf_event_task_context {
 	perf_nr_task_contexts,
 };
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+typedef struct replay_thread_control_block {
+        struct replay_sphere *sphere;
+        uint32_t thread_id;
+} rtcb_t;
+#endif
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1569,6 +1577,10 @@ struct task_struct {
 #endif
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	atomic_t ptrace_bp_refcnt;
+#endif
+
+#ifdef CONFIG_RECORD_REPLAY
+        rtcb_t *rtcb;
 #endif
 };
 

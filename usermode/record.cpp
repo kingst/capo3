@@ -26,6 +26,8 @@ int main(int argc, char *argv[], char *envp[]) {
         cerr << "could not open /dev/replay device" << endl;
         return 1;
     }
+    ret = ioctl(replayFd, REPLAY_IOC_RESET_SPHERE, 0);
+    assert(ret == 0);
 
     startChild(replayFd, argv+1, envp);
 
