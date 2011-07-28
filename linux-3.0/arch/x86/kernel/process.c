@@ -188,6 +188,10 @@ int set_tsc_mode(unsigned int val)
 	return 0;
 }
 
+#ifdef CONFIG_RECORD_REPLAY
+void replay_switch_to(struct task_struct *prev_p, struct task_struct *next_p);
+#endif
+
 void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		      struct tss_struct *tss)
 {
@@ -229,6 +233,13 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		 */
 		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
 	}
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
+           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
+                replay_switch_to(prev_p, next_p);
+#endif
+
 	propagate_user_return_notify(prev_p, next_p);
 }
 
