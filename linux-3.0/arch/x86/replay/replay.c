@@ -19,8 +19,6 @@
 
 #include <asm/replay.h>
 
-void replay_thread_create(struct pt_regs *regs);
-
 #define LOG_BUFFER_SIZE (8*1024*1024)
 #define NUM_REPLAY_MINOR 4
 
@@ -32,11 +30,14 @@ typedef struct replay_sphere {
         spinlock_t lock;
         struct kfifo fifo;
         wait_queue_head_t wait;
+        uint32_t next_thread_id;
         atomic_t fd_count;
         atomic_t num_threads;
         atomic_t num_readers;
         atomic_t num_writers;
 } replay_sphere_t;
+
+void replay_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
@@ -55,6 +56,7 @@ static int replay_open(struct inode *inode, struct file *file) {
                 }
 
                 sphere->state = done;
+                sphere->next_thread_id = 0;
                 sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
                 if(sphere->fifo_buffer == NULL) {
                         kfree(sphere);
@@ -86,13 +88,8 @@ static int replay_release(struct inode *inode, struct file *file) {
         if(inode->i_private != file->private_data)
                 BUG();
 
-        spin_lock(&sphere->lock);
         if(atomic_dec_return(&sphere->fd_count) < 0)
                 BUG();
-        if(kfifo_len(&sphere->fifo) > 0)
-                printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");
-        kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
-        spin_unlock(&sphere->lock);
 
 	return 0;
 }
@@ -121,9 +118,12 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
         }
 
         spin_lock(&sphere->lock);
-        if(sphere->state == done) {
+        if((sphere->state == done) && (kfifo_len(&sphere->fifo) == 0)) {
                 spin_unlock(&sphere->lock);
                 return 0;
+        } else if(sphere->state == replaying) {
+                spin_unlock(&sphere->lock);
+                return -EINVAL;
         }
         spin_unlock(&sphere->lock);
 
@@ -160,7 +160,6 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
 
 static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         replay_sphere_t *sphere;
-        rtcb_t *rtcb;
 
         if(file->private_data == NULL)
                 BUG();
@@ -174,18 +173,30 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 // the process will call this on itself before
                 // calling exec.  From this point on the process is being
                 // traced
-                if(atomic_read(&sphere->num_threads) > 0)
-                        BUG();
                 printk(KERN_CRIT "starting recording on process %d\n", current->pid);
-                set_thread_flag(TIF_RECORD_REPLAY);
-                rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
-                rtcb->sphere = sphere;
-                rtcb->thread_id = 1;
-                current->rtcb = rtcb;
-                replay_thread_create(task_pt_regs(current));
+
+                spin_lock(&sphere->lock);
+                if(sphere->state != idle) {
+                        spin_unlock(&sphere->lock);
+                        return -EINVAL;
+                }
+                sphere->state = recording;
+                spin_unlock(&sphere->lock);
+
+                replay_thread_create(current, sphere);
+
+                if(atomic_read(&sphere->num_threads) != 1)
+                        BUG();
+
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 spin_lock(&sphere->lock);
+                if(atomic_read(&sphere->num_threads) > 0)
+                        BUG();
                 sphere->state = idle;
+                sphere->next_thread_id = 1;
+                if(kfifo_len(&sphere->fifo) > 0)
+                    printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");
+                kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
                 spin_unlock(&sphere->lock);
         } else {
                 BUG();
@@ -263,12 +274,20 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
         int ret;
         uint32_t type = (uint32_t) event;
 
+        if(sphere->state != recording)
+                BUG();
+
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
         if(ret != sizeof(type)) return -1;
         ret = kfifo_in(&sphere->fifo, &thread_id, sizeof(thread_id));
         if(ret != sizeof(thread_id)) return -1;
         ret = kfifo_in(&sphere->fifo, regs, sizeof(*regs));
         if(ret != sizeof(*regs)) return -1;
+
+        // we should be able to avoid these if there is no one 
+        // waiting, but I am assuming that the wake up
+        // handler handles this reasonable efficiently
+        wake_up_interruptible(&sphere->wait);
 
         return 0;
 }
@@ -281,11 +300,6 @@ static void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_
         spin_lock(&sphere->lock);
         ret = record_header_locked(sphere, event, thread_id, regs);
         spin_unlock(&sphere->lock);
-
-        // we should be able to avoid these if there is no one 
-        // waiting, but I am assuming that the wake up
-        // handler handles this reasonable efficiently
-        wake_up_interruptible(&sphere->wait);
 
         if(ret)
                 BUG();
@@ -310,35 +324,54 @@ void replay_syscall_exit(struct pt_regs *regs) {
                       current->rtcb->thread_id, regs);
 }
 
-void replay_thread_create(struct pt_regs *regs) {
-        if(current->rtcb == NULL)
+void replay_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
+        rtcb_t *rtcb;
+        int ret;
+        struct pt_regs *regs = task_pt_regs(tsk);
+        if(tsk->rtcb != NULL)
                 BUG();
 
-        atomic_inc(&current->rtcb->sphere->num_threads);
+        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 
-        record_header(current->rtcb->sphere, thread_create_event, 
-                      current->rtcb->thread_id, regs);
+        rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
+
+        spin_lock(&sphere->lock);
+        rtcb->sphere = sphere;
+        rtcb->thread_id = sphere->next_thread_id++;
+        tsk->rtcb = rtcb;
+
+        atomic_inc(&rtcb->sphere->num_threads);
+
+        ret = record_header_locked(rtcb->sphere, thread_create_event, 
+                                   rtcb->thread_id, regs);
+        spin_unlock(&sphere->lock);        
+
+        if(ret)
+                BUG();
 }
 
 void replay_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
+        int num_threads, ret;
+
         if(rtcb == NULL)
                 BUG();
-
-        if(atomic_dec_return(&rtcb->sphere->num_threads) < 0)
-                BUG();
-
-        record_header(rtcb->sphere, thread_exit_event, 
-                      rtcb->thread_id, regs);
-        
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
 
         spin_lock(&rtcb->sphere->lock);
-        rtcb->sphere->state = done;
+        ret = record_header_locked(rtcb->sphere, thread_exit_event, 
+                                   rtcb->thread_id, regs);
+        num_threads = atomic_dec_return(&rtcb->sphere->num_threads);
+        if(num_threads == 0) {
+                rtcb->sphere->state = done;
+                wake_up_interruptible(&rtcb->sphere->wait);
+        }
         spin_unlock(&rtcb->sphere->lock);
-        wake_up_interruptible(&rtcb->sphere->wait);
+
+        if((num_threads < 0) || ret)
+                BUG();
 
         kfree(rtcb);
 }
