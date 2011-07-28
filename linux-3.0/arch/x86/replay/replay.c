@@ -476,14 +476,12 @@ int replay_general_protection(struct pt_regs *regs) {
 
         if(copy_from_user(&opcode, (void *) regs->ip, sizeof(opcode)))
                 return 0;
-        
+
+        // this code is for rdtsc emulation
         if(opcode != 0x310f)
                 return 0;
-
         
-        set_tsc_mode(PR_TSC_ENABLE);
         __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
-        disable_TSC();
 
         regs->ax = low;
         regs->dx = high;
