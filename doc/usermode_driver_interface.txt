@@ -22,7 +22,10 @@ Logging process:
 
 5) IN CHILD: execute execve
 
-6) IN PARENT: read from the open replay fd and save this data.  When
+6) IN PARENT: write out execve_event, this is the one event that the
+usermode portion needs to write out
+
+7) IN PARENT: read from the open replay fd and save this data.  When
 the replay sphere is done the read system call will return 0.
 
 Replay process:
