@@ -13,4 +13,10 @@ typedef enum {invalid_event=0, execve_event, syscall_enter_event,
 
 struct replay_sphere;
 
+typedef struct replay_header {
+    uint32_t type;
+    uint32_t thread_id;
+    struct pt_regs regs;
+} replay_header_t;
+
 #endif

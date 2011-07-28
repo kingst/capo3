@@ -1,4 +1,4 @@
-EXE = record replay test
+EXE = record replay test scan_log
 
 all: $(EXE)
 
@@ -10,13 +10,17 @@ SHARED_OBJS = util.o
 LOBJS = record.o $(SHARED_OBJS)
 ROBJS = replay.o $(SHARED_OBJS)
 TOBJS = test.o
+SOBJS = scan_log.o
 
-OBJS = $(ROBJS) $(LOBJS) $(TOBJS)
+OBJS = $(ROBJS) $(LOBJS) $(TOBJS) $(SOBJS)
 
 -include $(OBJS:.o=.d)
 
 test: $(TOBJS)
 	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(TOBJS)
+
+scan_log: $(SOBJS)
+	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(SOBJS)
 
 replay: $(ROBJS)
 	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(ROBJS)

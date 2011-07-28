@@ -377,17 +377,32 @@ static void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_
 /**********************************************************************************************/
 
 /*********************************** Callbacks from kernel ************************************/
-void replay_syscall_enter(struct pt_regs *regs) {        
+static void sanity_check(void) {
         if(current->rtcb == NULL)
                 BUG();
+
+        if(current->rtcb->sphere == NULL)
+                BUG();
+}
+
+void replay_syscall_enter(struct pt_regs *regs) {        
+        sanity_check();
+
+        if(regs->orig_ax == __NR_execve)
+                current->rtcb->wait_for_execve = 0;
+
+        if(current->rtcb->wait_for_execve)
+                return;
 
         record_header(current->rtcb->sphere, syscall_enter_event, 
                       current->rtcb->thread_id, regs);
 }
 
 void replay_syscall_exit(struct pt_regs *regs) {
-        if(current->rtcb == NULL)
-                BUG();
+        sanity_check();
+
+        if(current->rtcb->wait_for_execve)
+                return;
 
         record_header(current->rtcb->sphere, syscall_exit_event, 
                       current->rtcb->thread_id, regs);
@@ -410,6 +425,7 @@ void replay_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         spin_lock(&sphere->lock);
         rtcb->sphere = sphere;
         rtcb->thread_id = sphere->next_thread_id++;
+        rtcb->wait_for_execve = (rtcb->thread_id == 1) ? 1 : 0;
         tsk->rtcb = rtcb;
 
         atomic_inc(&rtcb->sphere->num_threads);
@@ -426,8 +442,7 @@ void replay_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
         int num_threads, ret;
 
-        if(rtcb == NULL)
-                BUG();
+        sanity_check();
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -457,8 +472,7 @@ int replay_general_protection(struct pt_regs *regs) {
         uint16_t opcode;
         long low, high;
 
-        if(rtcb == NULL)
-                BUG();
+        sanity_check();
 
         if(copy_from_user(&opcode, (void *) regs->ip, sizeof(opcode)))
                 return 0;
@@ -485,12 +499,12 @@ void replay_copy_to_user(unsigned long to_addr, void *buf, int len) {
         int ret;
         unsigned long flags;
 
-        if(current->rtcb == NULL)
+        sanity_check();
+
+        if(current->rtcb->wait_for_execve)
                 BUG();
 
         sphere = current->rtcb->sphere;
-        if(sphere == NULL)
-                BUG();
 
         // check for kernel addresses and return if we get one
         if(to_addr > PAGE_OFFSET)

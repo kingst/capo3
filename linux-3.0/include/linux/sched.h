@@ -1222,6 +1222,7 @@ enum perf_event_task_context {
 typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
         uint32_t thread_id;
+        int wait_for_execve;
 } rtcb_t;
 #endif
 
