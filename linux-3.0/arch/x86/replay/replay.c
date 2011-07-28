@@ -83,6 +83,7 @@ typedef struct replay_sphere {
 } replay_sphere_t;
 
 void replay_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
+static void wake_readers(replay_sphere_t *sphere);
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
@@ -314,6 +315,14 @@ MODULE_VERSION(REPLAY_VERSION);
 
 /*********************************** Helpers for logging **************************************/
 
+static void wake_readers(replay_sphere_t *sphere) {
+        // we should be able to avoid these if there is no one 
+        // waiting, but I am assuming that the wake up
+        // handler handles this reasonable efficiently
+        wake_up_interruptible(&sphere->wait);
+}
+
+
 static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
                                 uint32_t thread_id, struct pt_regs *regs) {
         int ret;
@@ -329,14 +338,29 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
         ret = kfifo_in(&sphere->fifo, regs, sizeof(*regs));
         if(ret != sizeof(*regs)) return -1;
 
-        // we should be able to avoid these if there is no one 
-        // waiting, but I am assuming that the wake up
-        // handler handles this reasonable efficiently
-        wake_up_interruptible(&sphere->wait);
+        wake_readers(sphere);
 
         return 0;
 }
 
+static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
+                                void *buf, uint32_t len) {
+
+        int ret;
+        if(sphere->state != recording)
+                BUG();
+
+        ret = kfifo_in(&sphere->fifo, &to_addr, sizeof(to_addr));
+        if(ret != sizeof(to_addr)) return -1;
+        ret = kfifo_in(&sphere->fifo, &len, sizeof(len));
+        if(ret != sizeof(len)) return -1;
+        ret = kfifo_in(&sphere->fifo, buf, len);
+        if(ret != len) return -1;
+
+        wake_readers(sphere);
+
+        return 0;
+}
 
 static void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                           struct pt_regs *regs) {
@@ -414,7 +438,7 @@ void replay_thread_exit(struct pt_regs *regs) {
         num_threads = atomic_dec_return(&rtcb->sphere->num_threads);
         if(num_threads == 0) {
                 rtcb->sphere->state = done;
-                wake_up_interruptible(&rtcb->sphere->wait);
+                wake_readers(rtcb->sphere);
         }
         spin_unlock(&rtcb->sphere->lock);
 
@@ -454,6 +478,37 @@ int replay_general_protection(struct pt_regs *regs) {
         record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
 
         return 1;
+}
+
+void replay_copy_to_user(unsigned long to_addr, void *buf, int len) {
+        replay_sphere_t *sphere;
+        int ret;
+
+        if(current->rtcb == NULL)
+                BUG();
+
+        sphere = current->rtcb->sphere;
+        if(sphere == NULL)
+                BUG();
+
+        // check for kernel addresses and return if we get one
+        if(to_addr > PAGE_OFFSET)
+                return;
+
+        spin_lock(&sphere->lock);
+        ret = record_header_locked(sphere, copy_to_user_event,
+                                   current->rtcb->thread_id, task_pt_regs(current));
+        if(ret) {
+                spin_unlock(&sphere->lock);
+                BUG();
+                return;
+        }
+        ret = record_buffer_locked(sphere, to_addr, buf, len);
+        spin_unlock(&sphere->lock);
+
+        if(ret)
+                BUG();
+
 }
 
 /**********************************************************************************************/

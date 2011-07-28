@@ -9,7 +9,7 @@
 
 typedef enum {invalid_event=0, execve_event, syscall_enter_event, 
               syscall_exit_event, thread_create_event, thread_exit_event,
-              instruction_event} replay_event_t;
+              instruction_event, copy_to_user_event} replay_event_t;
 
 struct replay_sphere;
 
