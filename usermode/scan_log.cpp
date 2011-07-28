@@ -56,6 +56,7 @@ using namespace std;
 int main(void) {
     replay_header_t header;
     int ret;
+    struct execve_data *e;
 
     while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
         assert(ret == sizeof(header));
@@ -70,6 +71,9 @@ int main(void) {
             cout << "thread_exit_event" << endl;
         } else if(header.type == instruction_event) {
             cout << "instruction_event" << endl;
+        } else if(header.type == execve_event) {
+            cout << "execve_event" << endl;
+            e = readExecveData();
         } else {
             assert(false);
         }

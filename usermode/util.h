@@ -40,4 +40,14 @@ struct pt_regs {
 
 pid_t startChild(int replayFd, char *argv[], char *envp[]);
 
+struct execve_data {
+    char *fileName;
+    int32_t argc;
+    int32_t envc;
+    char **argv;
+    char **envp;
+};
+
+struct execve_data *readExecveData(void);
+
 #endif

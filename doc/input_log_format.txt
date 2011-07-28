@@ -7,7 +7,7 @@ string:
 
 execve_enter_entry:
 
-<header><i32 argc><i32 envc><string file_name><string argv>*argc
+<header><string file_name><i32 argc><string argv>*argc<i32 envc>
     <string envp>*envc
 
 syscall_enter_entry, syscall_exit_entry, instruction_entry,

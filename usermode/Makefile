@@ -10,7 +10,7 @@ SHARED_OBJS = util.o
 LOBJS = record.o $(SHARED_OBJS)
 ROBJS = replay.o $(SHARED_OBJS)
 TOBJS = test.o
-SOBJS = scan_log.o
+SOBJS = scan_log.o $(SHARED_OBJS)
 
 OBJS = $(ROBJS) $(LOBJS) $(TOBJS) $(SOBJS)
 
