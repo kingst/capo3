@@ -1,4 +1,4 @@
-EXE = record replay
+EXE = record replay test
 
 all: $(EXE)
 
@@ -9,10 +9,14 @@ LDFLAGS = -static
 SHARED_OBJS = util.o
 LOBJS = record.o $(SHARED_OBJS)
 ROBJS = replay.o $(SHARED_OBJS)
+TOBJS = test.o
 
-OBJS = $(ROBJS) $(LOBJS)
+OBJS = $(ROBJS) $(LOBJS) $(TOBJS)
 
 -include $(OBJS:.o=.d)
+
+test: $(TOBJS)
+	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(TOBJS)
 
 replay: $(ROBJS)
 	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(ROBJS)

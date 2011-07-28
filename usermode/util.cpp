@@ -53,13 +53,11 @@ void startRecording(int replayFd) {
 
 pid_t startChild(int replayFd, char *argv[], char *envp[]) {
     pid_t pid;
-    long low, high;
 
     pid = fork();
     if(pid == 0) {
         dup2(STDERR_FILENO, STDOUT_FILENO);
         startRecording(replayFd);        
-        __asm__ __volatile__("rdtsc" : "=a" (low), "=d" (high));
         execve(argv[0], argv, envp);
         assert(false);
     }
