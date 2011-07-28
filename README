@@ -1,1 +1,11 @@
-This is my README, I see that you are reading me.
+This project is a system called Capo3, a system for recording and
+replaying Linux processes.  To build the system you compile the kernel
+like normal, and select the "CONFIG_RECORD_REPLAY" configuration
+option.  The source code for the kernel module is located at:
+
+arch/x86/replay/replay.c
+
+And scattered throughout the rest of the kernel.  To find the other
+places where replay specific code resides try grepping for
+CONFIG_RECORD_REPLAY and you will see the additions to the kernel
+proper.
