@@ -2,7 +2,7 @@ Here are the places where we have the kernel call into the replay
 driver.  In all cases the current process is a process that is part of
 the replay sphere unless otherwise noted explicitly.
 
-replay_syscall_enter: called at the entrace to all system calls.
+replay_syscall_enter: called at the entrance to all system calls.
 
 replay_syscall_exit: called after executing the system call.
 
