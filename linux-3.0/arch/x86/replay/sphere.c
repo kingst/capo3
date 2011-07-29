@@ -106,6 +106,17 @@ void sphere_reset(replay_sphere_t *sphere) {
         spin_unlock(&sphere->lock);
 }
 
+int sphere_is_recording_replaying(replay_sphere_t *sphere) {
+        int ret = 0;
+
+        spin_lock(&sphere->lock);
+        if((sphere->state == recording) || (sphere->state == replaying))
+                ret = 1;
+        spin_unlock(&sphere->lock);
+
+        return ret;
+}
+
 void sphere_inc_fd(replay_sphere_t *sphere) {
         atomic_inc(&sphere->fd_count);
 }
@@ -231,3 +242,78 @@ void sphere_thread_exit(replay_sphere_t *sphere) {
         }
         spin_unlock(&sphere->lock);
 }
+
+
+/********************************** Helpers for recording *************************************/
+
+static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
+                                uint32_t thread_id, struct pt_regs *regs) {
+        int ret;
+        uint32_t type = (uint32_t) event;
+
+        if(sphere->state != recording)
+                BUG();
+
+        ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
+        if(ret != sizeof(type)) return -1;
+        ret = kfifo_in(&sphere->fifo, &thread_id, sizeof(thread_id));
+        if(ret != sizeof(thread_id)) return -1;
+        ret = kfifo_in(&sphere->fifo, regs, sizeof(*regs));
+        if(ret != sizeof(*regs)) return -1;
+
+        sphere_wake_readers(sphere);
+
+        return 0;
+}
+
+static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
+                                void *buf, uint32_t len) {
+
+        int ret;
+        if(sphere->state != recording)
+                BUG();
+
+        ret = kfifo_in(&sphere->fifo, &to_addr, sizeof(to_addr));
+        if(ret != sizeof(to_addr)) return -1;
+        ret = kfifo_in(&sphere->fifo, &len, sizeof(len));
+        if(ret != sizeof(len)) return -1;
+        ret = kfifo_in(&sphere->fifo, buf, len);
+        if(ret != len) return -1;
+
+        sphere_wake_readers(sphere);
+
+        return 0;
+}
+
+void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                   struct pt_regs *regs) {
+        int ret;
+
+        spin_lock(&sphere->lock);
+        ret = record_header_locked(sphere, event, thread_id, regs);
+        spin_unlock(&sphere->lock);
+
+        if(ret)
+                BUG();
+}
+
+void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len) {
+        int ret;
+        unsigned long flags;
+
+        spin_lock_irqsave(&sphere->lock, flags);
+        ret = record_header_locked(sphere, copy_to_user_event,
+                                   current->rtcb->thread_id, task_pt_regs(current));
+        if(ret) {
+                spin_unlock_irqrestore(&sphere->lock, flags);
+                BUG();
+                return;
+        }
+        ret = record_buffer_locked(sphere, to_addr, buf, len);
+        spin_unlock_irqrestore(&sphere->lock, flags);
+
+        if(ret)
+                BUG();
+}
+
+/**********************************************************************************************/

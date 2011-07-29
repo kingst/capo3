@@ -51,6 +51,7 @@ void rr_send_signal(struct pt_regs *regs);
 
 replay_sphere_t *sphere_alloc(void);
 void sphere_reset(replay_sphere_t *sphere);
+int sphere_is_recording_replaying(replay_sphere_t *sphere);
 void sphere_inc_fd(replay_sphere_t *sphere);
 void sphere_dec_fd(replay_sphere_t *sphere);
 int sphere_is_done_recording(replay_sphere_t *sphere);
@@ -60,5 +61,9 @@ void sphere_wake_readers(replay_sphere_t *sphere);
 int sphere_start_recording(replay_sphere_t *sphere);
 uint32_t sphere_next_thread_id(replay_sphere_t *sphere);
 void sphere_thread_exit(replay_sphere_t *sphere);
+
+void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                   struct pt_regs *regs);
+void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
 
 #endif
