@@ -1218,12 +1218,7 @@ enum perf_event_task_context {
 };
 
 #ifdef CONFIG_RECORD_REPLAY
-#include <asm/replay.h>
-typedef struct replay_thread_control_block {
-        struct replay_sphere *sphere;
-        uint32_t thread_id;
-        int wait_for_execve;
-} rtcb_t;
+struct replay_thread_control_block;
 #endif
 
 struct task_struct {
@@ -1581,7 +1576,7 @@ struct task_struct {
 #endif
 
 #ifdef CONFIG_RECORD_REPLAY
-        rtcb_t *rtcb;
+        struct replay_thread_control_block *rtcb;
 #endif
 };
 

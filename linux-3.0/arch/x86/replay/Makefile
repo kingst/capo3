@@ -1,3 +1,2 @@
-obj-y	:=  replay.o
+obj-$(CONFIG_RECORD_REPLAY)	:=  replay.o sphere.o
 
-#obj-$(CONFIG_X86_PAT)		+= pat_rbtree.o

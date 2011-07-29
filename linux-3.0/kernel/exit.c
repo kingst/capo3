@@ -57,6 +57,11 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
+
 static void exit_mm(struct task_struct * tsk);
 
 static void __unhash_process(struct task_struct *p, bool group_dead)
@@ -899,10 +904,6 @@ static void check_stack_usage(void)
 static inline void check_stack_usage(void) {}
 #endif
 
-#ifdef CONFIG_RECORD_REPLAY
-void replay_thread_exit(struct pt_regs *regs);
-#endif
-
 NORET_TYPE void do_exit(long code)
 {
 	struct task_struct *tsk = current;
@@ -931,7 +932,7 @@ NORET_TYPE void do_exit(long code)
 
 #ifdef CONFIG_RECORD_REPLAY
         if(test_thread_flag(TIF_RECORD_REPLAY))
-                replay_thread_exit(task_pt_regs(tsk));
+                rr_thread_exit(task_pt_regs(tsk));
 #endif
 
 	validate_creds_for_do_exit(tsk);

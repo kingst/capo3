@@ -58,6 +58,11 @@
 
 #include <asm/mach_traps.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
+
 #ifdef CONFIG_X86_64
 #include <asm/x86_init.h>
 #include <asm/pgalloc.h>
@@ -256,9 +261,6 @@ dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code)
 }
 #endif
 
-#ifdef CONFIG_RECORD_REPLAY
-int replay_general_protection(struct pt_regs *regs);
-#endif
 
 dotraplinkage void __kprobes
 do_general_protection(struct pt_regs *regs, long error_code)
@@ -278,7 +280,7 @@ do_general_protection(struct pt_regs *regs, long error_code)
 
 #ifdef CONFIG_RECORD_REPLAY
         if(test_thread_flag(TIF_RECORD_REPLAY)) {
-                if(replay_general_protection(regs)) {
+                if(rr_general_protection(regs)) {
                         return;
                 }
         }

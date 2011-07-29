@@ -23,6 +23,11 @@
 #include <asm/i387.h>
 #include <asm/debugreg.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
+
 struct kmem_cache *task_xstate_cachep;
 EXPORT_SYMBOL_GPL(task_xstate_cachep);
 
@@ -188,10 +193,6 @@ int set_tsc_mode(unsigned int val)
 	return 0;
 }
 
-#ifdef CONFIG_RECORD_REPLAY
-void replay_switch_to(struct task_struct *prev_p, struct task_struct *next_p);
-#endif
-
 void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		      struct tss_struct *tss)
 {
@@ -237,7 +238,7 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 #ifdef CONFIG_RECORD_REPLAY
         if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
            test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
-                replay_switch_to(prev_p, next_p);
+                rr_switch_to(prev_p, next_p);
 #endif
 
 	propagate_user_return_notify(prev_p, next_p);
