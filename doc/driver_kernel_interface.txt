@@ -8,7 +8,7 @@ replay_syscall_exit: called after executing the system call.
 
 replay_thread_create: called before executing a newly created thread.
 For this call the rtcb is not going to be set yet and it might get
-called on a thread that is different that current.
+called on a thread that is different than current.
 
 replay_thread_exit: called when the OS is going to kill a thread.
 
