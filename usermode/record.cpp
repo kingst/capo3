@@ -49,6 +49,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <string.h>
@@ -99,7 +100,7 @@ void recordExecve(char *fileName, char *argv[], char *envp[]) {
 
 int main(int argc, char *argv[], char *envp[]) {
     unsigned char buf[4096];
-    int replayFd, ret, bytesWritten;
+    int replayFd, ret, bytesWritten, status;
 
     if(argc < 2) {
         cerr << "Usage " << argv[0] << ": exe_path [arguments] > replay.log" << endl;
@@ -124,6 +125,9 @@ int main(int argc, char *argv[], char *envp[]) {
     }
 
     assert(ret == 0);
+
+    while(wait(&status) != -1)
+        ;
 
     return 0;
 }

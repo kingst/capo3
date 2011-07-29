@@ -11,6 +11,14 @@ typedef enum {invalid_event=0, execve_event, syscall_enter_event,
               syscall_exit_event, thread_create_event, thread_exit_event,
               instruction_event, copy_to_user_event, signal_event} replay_event_t;
 
+typedef struct replay_header {
+    uint32_t type;
+    uint32_t thread_id;
+    struct pt_regs regs;
+} replay_header_t;
+
+#ifdef __KERNEL__
+
 #include <linux/kfifo.h>
 
 typedef enum {idle, recording, replaying, done} replay_state_t;
@@ -33,12 +41,6 @@ typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
         uint32_t thread_id;
 } rtcb_t;
-
-typedef struct replay_header {
-    uint32_t type;
-    uint32_t thread_id;
-    struct pt_regs regs;
-} replay_header_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
 void rr_syscall_exit(struct pt_regs *regs);
@@ -64,5 +66,7 @@ void sphere_thread_exit(replay_sphere_t *sphere);
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs);
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
+
+#endif
 
 #endif
