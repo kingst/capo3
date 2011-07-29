@@ -1,0 +1,26 @@
+Here are the places where we have the kernel call into the replay
+driver.  In all cases the current process is a process that is part of
+the replay sphere unless otherwise noted explicitly.
+
+replay_syscall_enter: called at the entrace to all system calls.
+
+replay_syscall_exit: called after executing the system call.
+
+replay_thread_create: called before executing a newly created thread.
+For this call the rtcb is not going to be set yet and it might get
+called on a thread that is different that current.
+
+replay_thread_exit: called when the OS is going to kill a thread.
+
+replay_switch_to: called as part of the context switching function in
+the kernel.  prev_p is the current process and next_p is the process
+that the kernel is about to switch in.
+
+replay_general_protection: called on general protection faults, the
+replay module uses this to emulate rdtsc and cpuid instructions.
+
+replay_copy_to_user: called when the kernel is about copy data into a
+thread that is part of a replay sphere.
+
+replay_send_signal: called when the kernel is about to deliver a
+signal to a process.
