@@ -20,7 +20,7 @@ typedef struct replay_sphere {
         unsigned char *fifo_buffer;
         spinlock_t lock;
         struct kfifo fifo;
-        wait_queue_head_t readers_wait;
+        wait_queue_head_t usermode_wait;
         uint32_t next_thread_id;
         atomic_t fd_count;
         int num_threads;
@@ -56,8 +56,7 @@ void sphere_inc_fd(replay_sphere_t *sphere);
 void sphere_dec_fd(replay_sphere_t *sphere);
 int sphere_is_done_recording(replay_sphere_t *sphere);
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count);
-int sphere_wait_readers(replay_sphere_t *sphere);
-void sphere_wake_readers(replay_sphere_t *sphere);
+int sphere_wait_usermode(replay_sphere_t *sphere);
 int sphere_start_recording(replay_sphere_t *sphere);
 uint32_t sphere_next_thread_id(replay_sphere_t *sphere);
 void sphere_thread_exit(replay_sphere_t *sphere);

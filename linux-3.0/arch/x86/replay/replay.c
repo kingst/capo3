@@ -132,7 +132,7 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
         if(atomic_inc_return(&sphere->num_readers) > 1)
                 return -EINVAL;
 
-        ret = sphere_wait_readers(sphere);
+        ret = sphere_wait_usermode(sphere);
         if(ret) {
                 atomic_dec(&sphere->num_readers);
                 return ret;

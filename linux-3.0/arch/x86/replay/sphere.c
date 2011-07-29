@@ -66,6 +66,8 @@
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
 
+static void sphere_wake_usermode(replay_sphere_t *sphere);
+
 replay_sphere_t *sphere_alloc(void) {
         replay_sphere_t *sphere;
         sphere = kmalloc(sizeof(replay_sphere_t), GFP_KERNEL);
@@ -85,7 +87,7 @@ replay_sphere_t *sphere_alloc(void) {
         
         spin_lock_init(&sphere->lock);
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
-        init_waitqueue_head(&sphere->readers_wait);
+        init_waitqueue_head(&sphere->usermode_wait);
         sphere->num_threads = 0;
         atomic_set(&sphere->fd_count, 0);
         atomic_set(&sphere->num_readers, 0);
@@ -184,19 +186,22 @@ int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count)
         return bytesRead;
 }
 
-int sphere_wait_readers(replay_sphere_t *sphere) {
+int sphere_wait_usermode(replay_sphere_t *sphere) {
         int ret;
+        
+        if(current->rtcb)
+                BUG();
 
-        ret = wait_event_interruptible(sphere->readers_wait, sphere_has_data(sphere));
+        ret = wait_event_interruptible(sphere->usermode_wait, sphere_has_data(sphere));
 
         return (ret == -ERESTARTSYS) ? -ERESTARTSYS : 0;
 }
 
-void sphere_wake_readers(replay_sphere_t *sphere) {
+static void sphere_wake_usermode(replay_sphere_t *sphere) {
         // we should be able to avoid these if there is no one 
         // waiting, but I am assuming that the wake up
         // handler handles this reasonable efficiently
-        wake_up_interruptible(&sphere->readers_wait);
+        wake_up_interruptible(&sphere->usermode_wait);
 }
 
 
@@ -238,7 +243,7 @@ void sphere_thread_exit(replay_sphere_t *sphere) {
         
         if(sphere->num_threads == 0) {
                 sphere->state = done;
-                sphere_wake_readers(sphere);
+                sphere_wake_usermode(sphere);
         }
         spin_unlock(&sphere->lock);
 }
@@ -261,7 +266,7 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
         ret = kfifo_in(&sphere->fifo, regs, sizeof(*regs));
         if(ret != sizeof(*regs)) return -1;
 
-        sphere_wake_readers(sphere);
+        sphere_wake_usermode(sphere);
 
         return 0;
 }
@@ -280,7 +285,7 @@ static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
         ret = kfifo_in(&sphere->fifo, buf, len);
         if(ret != len) return -1;
 
-        sphere_wake_readers(sphere);
+        sphere_wake_usermode(sphere);
 
         return 0;
 }
