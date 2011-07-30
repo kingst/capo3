@@ -69,7 +69,6 @@
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
 static int replay_major = 0;
-//DEFINE_MUTEX(replay_mutex);
 static struct mutex replay_mutex;
 
 #define REPLAY_VERSION	"0.3"
@@ -110,6 +109,38 @@ static int replay_release(struct inode *inode, struct file *file) {
 	return 0;
 }
 
+static ssize_t replay_write(struct file *file, const char __user *buf, size_t count,
+                            loff_t *f_pos) {
+        int ret = 0;
+        replay_sphere_t *sphere;
+        ssize_t bytesWritten;
+
+        sphere = (replay_sphere_t *) file->private_data;
+        if(sphere == NULL) {
+                BUG();
+                return -EINVAL;
+        }
+        if(current->rtcb != NULL) {
+                BUG();
+                return -EINVAL;
+        }
+
+        if(atomic_inc_return(&sphere->num_writers) > 1)
+                return -EINVAL;
+
+        ret = sphere_wait_usermode(sphere, 1);
+        if(ret) {
+                atomic_dec(&sphere->num_writers);
+                return ret;
+        }
+        
+        bytesWritten = sphere_fifo_from_user(sphere, buf, count);
+
+        atomic_dec(&sphere->num_writers);
+        
+        return bytesWritten;
+}
+
 static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
                              loff_t *f_pos) {
         int ret = 0;
@@ -132,7 +163,7 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
         if(atomic_inc_return(&sphere->num_readers) > 1)
                 return -EINVAL;
 
-        ret = sphere_wait_usermode(sphere);
+        ret = sphere_wait_usermode(sphere, 0);
         if(ret) {
                 atomic_dec(&sphere->num_readers);
                 return ret;
@@ -162,6 +193,9 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 // traced
                 ret = sphere_start_recording(sphere);
                 rr_thread_create(current, sphere);
+        } else if(cmd == REPLAY_IOC_START_REPLAYING) {
+                ret = sphere_start_replaying(sphere);
+                rr_thread_create(current, sphere);
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 sphere_reset(sphere);
         } else {
@@ -184,6 +218,7 @@ static int __init replay_init(void) {
 
         memset(&replay_fops, 0, sizeof(replay_fops));
         replay_fops.read = replay_read;
+        replay_fops.write = replay_write;
         replay_fops.open = replay_open;
         replay_fops.unlocked_ioctl = replay_ioctl;
         replay_fops.release = replay_release;
@@ -255,17 +290,29 @@ static void sanity_check(void) {
 }
 
 void rr_syscall_enter(struct pt_regs *regs) {
+        rtcb_t *rtcb;
         sanity_check();
 
-        record_header(current->rtcb->sphere, syscall_enter_event, 
-                      current->rtcb->thread_id, regs);
+        rtcb = current->rtcb;
+
+        if(sphere_is_recording(rtcb->sphere)) {
+                record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+        }
 }
 
 void rr_syscall_exit(struct pt_regs *regs) {
+        rtcb_t *rtcb;
         sanity_check();
 
-        record_header(current->rtcb->sphere, syscall_exit_event, 
-                      current->rtcb->thread_id, regs);
+        rtcb = current->rtcb;
+
+        if(sphere_is_recording(rtcb->sphere)) {
+                record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+        }
 }
 
 void rr_send_signal(struct pt_regs *regs) {
@@ -273,6 +320,7 @@ void rr_send_signal(struct pt_regs *regs) {
 
         record_header(current->rtcb->sphere, signal_event, 
                       current->rtcb->thread_id, regs);
+        BUG();
 }
 
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
@@ -292,7 +340,11 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->thread_id = sphere_next_thread_id(sphere);
         tsk->rtcb = rtcb;
 
-        record_header(rtcb->sphere, thread_create_event, rtcb->thread_id, regs);
+        if(sphere_is_recording(sphere)) {
+                record_header(rtcb->sphere, thread_create_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, thread_create_event, rtcb->thread_id, regs);
+        }
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
@@ -303,9 +355,12 @@ void rr_thread_exit(struct pt_regs *regs) {
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
 
-        
-        record_header(rtcb->sphere, thread_exit_event, rtcb->thread_id, regs);
-        
+        if(sphere_is_recording(rtcb->sphere)) {
+                record_header(rtcb->sphere, thread_exit_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, thread_exit_event, rtcb->thread_id, regs);
+        }
+
         sphere_thread_exit(rtcb->sphere);
 
         kfree(rtcb);
@@ -328,14 +383,17 @@ int rr_general_protection(struct pt_regs *regs) {
         // this code is for rdtsc emulation
         if(opcode != 0x310f)
                 return 0;
-        
-        __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
-
-        regs->ax = low;
-        regs->dx = high;
-        regs->ip += 2;
-
-        record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+        if(sphere_is_recording(rtcb->sphere)) {
+                __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+                
+                regs->ax = low;
+                regs->dx = high;
+                regs->ip += 2;
+                
+                record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+        }
 
         return 1;
 }
@@ -348,6 +406,7 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 return;
 
         record_copy_to_user(current->rtcb->sphere, to_addr, buf, len);
+        BUG();
 }
 
 /**********************************************************************************************/

@@ -117,7 +117,7 @@ int main(int argc, char *argv[], char *envp[]) {
 
     argv++;
     recordExecve(argv[0], argv, envp);
-    startChild(replayFd, argv, envp);
+    startChild(replayFd, argv, envp, 1);
 
     while((ret = read(replayFd, buf, sizeof(buf))) > 0) {
         bytesWritten = write(STDOUT_FILENO, buf, ret);

@@ -51,13 +51,22 @@ void startRecording(int replayFd) {
     assert(ret == 0);
 }
 
-pid_t startChild(int replayFd, char *argv[], char *envp[]) {
+void startReplaying(int replayFd) {
+    int ret = ioctl(replayFd, REPLAY_IOC_START_REPLAYING, 0);
+    assert(ret == 0);
+}
+
+pid_t startChild(int replayFd, char *argv[], char *envp[], int rec) {
     pid_t pid;
 
     pid = fork();
     if(pid == 0) {
         dup2(STDERR_FILENO, STDOUT_FILENO);
-        startRecording(replayFd);        
+        if(rec) {
+            startRecording(replayFd);        
+        } else {
+            startReplaying(replayFd);
+        }
         execve(argv[0], argv, envp);
         assert(false);
     }

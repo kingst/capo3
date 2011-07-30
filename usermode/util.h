@@ -38,7 +38,7 @@ struct pt_regs {
 
 #include <asm/replay.h>
 
-pid_t startChild(int replayFd, char *argv[], char *envp[]);
+pid_t startChild(int replayFd, char *argv[], char *envp[], int rec);
 
 struct execve_data {
     char *fileName;

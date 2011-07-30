@@ -49,8 +49,48 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
+#include <assert.h>
+#include <string.h>
 
-int main(int argc, char *argv[]) {
+#include "util.h"
+
+using namespace std;
+
+
+int main(void) {
+    unsigned char buf[4096];
+    int replayFd, ret, bytesWritten, status, len;
+    replay_header_t header;
+    struct execve_data *e;
+
+    replayFd = open("/dev/replay0", O_WRONLY | O_CLOEXEC);
+    if(replayFd < 0) {
+        cerr << "could not open /dev/replay device" << endl;
+        return 1;
+    }
+    ret = ioctl(replayFd, REPLAY_IOC_RESET_SPHERE, 0);
+    assert(ret == 0);
+
+    ret = read(STDIN_FILENO, &header, sizeof(header));
+    assert(ret == sizeof(header));
+    
+    e = readExecveData();
+    startChild(replayFd, e->argv, e->envp, 0);
+
+    while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
+        bytesWritten = 0;
+        len = ret;
+        while(bytesWritten < len) {
+            ret = write(replayFd, buf+bytesWritten, len-bytesWritten);
+            assert(ret > 0);
+            bytesWritten += ret;
+        }
+    }
+
+    while(wait(&status) != -1)
+        ;
+
     return 0;
 }
