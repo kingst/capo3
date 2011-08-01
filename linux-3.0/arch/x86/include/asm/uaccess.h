@@ -234,25 +234,20 @@ extern void __put_user_8(void);
 
 #ifdef CONFIG_RECORD_REPLAY
 
-#define put_user(x, ptr)                                       \
-({                                                             \
-        int ret = put_user_orig(x, ptr);                       \
-        unsigned long long val = (unsigned long long) x;       \
-        if(sizeof(val) < sizeof(*(ptr)))                       \
-                BUG();                                         \
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))  \
-                rr_copy_to_user((unsigned long) (ptr), &val, sizeof(*(ptr))); \
-        ret;                                                   \
+#define put_user(x, ptr)                                                \
+({                                                                      \
+        int ret = 0;                                                    \
+	__typeof__(*(ptr))__pus_tmp = x;				\
+        ret = copy_to_user(ptr, &__pus_tmp, sizeof(__pus_tmp));         \
+        ret;                                                            \
 })
-#define __put_user(x, ptr)                                     \
-({                                                             \
-        int ret = __put_user_orig(x, ptr);                     \
-        unsigned long long val = (unsigned long long) x;       \
-        if(sizeof(val) < sizeof(*(ptr)))                       \
-                BUG();                                         \
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))  \
-                rr_copy_to_user((unsigned long) (ptr), &val, sizeof(*(ptr))); \
-        ret;                                                   \
+
+#define __put_user(x, ptr)                                              \
+({                                                                      \
+        int ret = 0;                                                    \
+	__typeof__(*(ptr))__pus_tmp = x;				\
+        ret = __copy_to_user(ptr, &__pus_tmp, sizeof(__pus_tmp));       \
+        ret;                                                            \
 })
 
 #else

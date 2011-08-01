@@ -68,13 +68,15 @@ int copy_to_user_orig(void __user *dst, const void *src, unsigned size)
 }
 
 #ifdef CONFIG_RECORD_REPLAY
-#define copy_to_user(dst, src, size)                                            \
-({                                                                              \
-        int ret = copy_to_user_orig((dst), (src), (size));                      \
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))                   \
-                rr_copy_to_user((unsigned long) (dst), (void *) (src), (size)); \
-        ret;                                                                    \
-})
+
+static __always_inline __must_check
+int copy_to_user(void __user *dst, const void *src, unsigned size)
+{
+        int ret = copy_to_user_orig(dst, src, size);    
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
+                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+        return ret;
+}
 
 #else
 
@@ -174,13 +176,14 @@ int __copy_to_user_orig(void __user *dst, const void *src, unsigned size)
 
 #ifdef CONFIG_RECORD_REPLAY
 
-#define __copy_to_user(dst, src, size)                                          \
-({                                                                              \
-        int ret = __copy_to_user_orig((dst), (src), (size));                    \
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))                   \
-                rr_copy_to_user((unsigned long) (dst), (void *) (src), (size)); \
-        ret;                                                                    \
-})
+static __always_inline __must_check
+int __copy_to_user(void __user *dst, const void *src, unsigned size)
+{
+        int ret = __copy_to_user_orig(dst, src, size);    
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
+                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+        return ret;
+}
 
 
 #else

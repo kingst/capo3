@@ -485,6 +485,8 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                         if(ret || (len != bytesWritten)) BUG();
                 } else {
                         bytesWritten = len;
+                        // XXX FIXME we should put something here to check and make sure the values
+                        // are the same
                         for(i = 0; i < len; i++) {
                                 ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
                                 if(ret != sizeof(c)) BUG();
@@ -536,12 +538,14 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         // for now we will just check syscall parameters and a few others
         check_reg("orig_ax", regs->orig_ax, stored_regs->orig_ax);
         check_reg("ax", regs->ax, stored_regs->ax);
-        check_reg("bx", regs->bx, stored_regs->bx);
         check_reg("cx", regs->cx, stored_regs->cx);
         check_reg("dx", regs->dx, stored_regs->dx);
         check_reg("si", regs->si, stored_regs->si);
         check_reg("di", regs->di, stored_regs->di);
+        check_reg("r8", regs->r8, stored_regs->r8);
         check_reg("r9", regs->r9, stored_regs->r9);
+        check_reg("r10", regs->r10, stored_regs->r10);
+        check_reg("r11", regs->r11, stored_regs->r11);
         check_reg("ip", regs->ip, stored_regs->ip);
         check_reg("sp", regs->sp, stored_regs->sp);
 }
@@ -551,8 +555,6 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         
         replay_header_t *header;
         int is_ctu = 0;
-
-        //printk(KERN_CRIT "replay_event type = %u, orig_ax = %lu\n", event, regs->orig_ax);
 
         do {
                 spin_lock(&sphere->replay_thread_wait.lock);
