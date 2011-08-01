@@ -552,7 +552,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         replay_header_t *header;
         int is_ctu = 0;
 
-        printk(KERN_CRIT "replay_event type = %u, orig_ax = %lu\n", event, regs->orig_ax);
+        //printk(KERN_CRIT "replay_event type = %u, orig_ax = %lu\n", event, regs->orig_ax);
 
         do {
                 spin_lock(&sphere->replay_thread_wait.lock);
