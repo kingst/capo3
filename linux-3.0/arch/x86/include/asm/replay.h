@@ -30,6 +30,7 @@ typedef struct replay_sphere {
         struct kfifo fifo;
         wait_queue_head_t usermode_wait;
         wait_queue_head_t replay_thread_wait;
+        int fifo_head_ctu_buf;
         uint32_t next_thread_id;
         atomic_t fd_count;
         int num_threads;

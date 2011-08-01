@@ -405,8 +405,11 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
         if(to_addr > PAGE_OFFSET)
                 return;
 
-        record_copy_to_user(current->rtcb->sphere, to_addr, buf, len);
-        BUG();
+        if(sphere_is_recording(current->rtcb->sphere)) {
+                record_copy_to_user(current->rtcb->sphere, to_addr, buf, len);
+        } else {
+                //BUG();
+        }
 }
 
 /**********************************************************************************************/

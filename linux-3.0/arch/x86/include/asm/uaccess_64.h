@@ -60,12 +60,29 @@ static inline unsigned long __must_check copy_from_user(void *to,
 }
 
 static __always_inline __must_check
-int copy_to_user(void __user *dst, const void *src, unsigned size)
+int copy_to_user_orig(void __user *dst, const void *src, unsigned size)
 {
 	might_fault();
 
 	return _copy_to_user(dst, src, size);
 }
+
+#ifdef CONFIG_RECORD_REPLAY
+#define copy_to_user(dst, src, size)                                            \
+({                                                                              \
+        int ret = copy_to_user_orig((dst), (src), (size));                      \
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))                   \
+                rr_copy_to_user((unsigned long) (dst), (void *) (src), (size)); \
+        ret;                                                                    \
+})
+
+#else
+
+#define copy_to_user(dst,src,size) copy_to_user_orig((dst),(src),(size))
+
+#endif
+
+
 
 static __always_inline __must_check
 int __copy_from_user(void *dst, const void __user *src, unsigned size)
@@ -112,7 +129,7 @@ int __copy_from_user(void *dst, const void __user *src, unsigned size)
 }
 
 static __always_inline __must_check
-int __copy_to_user(void __user *dst, const void *src, unsigned size)
+int __copy_to_user_orig(void __user *dst, const void *src, unsigned size)
 {
 	int ret = 0;
 
@@ -154,6 +171,23 @@ int __copy_to_user(void __user *dst, const void *src, unsigned size)
 		return copy_user_generic((__force void *)dst, src, size);
 	}
 }
+
+#ifdef CONFIG_RECORD_REPLAY
+
+#define __copy_to_user(dst, src, size)                                          \
+({                                                                              \
+        int ret = __copy_to_user_orig((dst), (src), (size));                    \
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))                   \
+                rr_copy_to_user((unsigned long) (dst), (void *) (src), (size)); \
+        ret;                                                                    \
+})
+
+
+#else
+
+#define __copy_to_user(dst, src, size) __copy_to_user_orig((dst), (src), (size))
+
+#endif
 
 static __always_inline __must_check
 int __copy_in_user(void __user *dst, const void __user *src, unsigned size)

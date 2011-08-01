@@ -10,6 +10,10 @@
 #include <asm/asm.h>
 #include <asm/page.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
 
@@ -228,6 +232,36 @@ extern void __put_user_2(void);
 extern void __put_user_4(void);
 extern void __put_user_8(void);
 
+#ifdef CONFIG_RECORD_REPLAY
+
+#define put_user(x, ptr)                                       \
+({                                                             \
+        int ret = put_user_orig(x, ptr);                       \
+        unsigned long long val = (unsigned long long) x;       \
+        if(sizeof(val) < sizeof(*(ptr)))                       \
+                BUG();                                         \
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))  \
+                rr_copy_to_user((unsigned long) (ptr), &val, sizeof(*(ptr))); \
+        ret;                                                   \
+})
+#define __put_user(x, ptr)                                     \
+({                                                             \
+        int ret = __put_user_orig(x, ptr);                     \
+        unsigned long long val = (unsigned long long) x;       \
+        if(sizeof(val) < sizeof(*(ptr)))                       \
+                BUG();                                         \
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))  \
+                rr_copy_to_user((unsigned long) (ptr), &val, sizeof(*(ptr))); \
+        ret;                                                   \
+})
+
+#else
+
+#define put_user(x, ptr) put_user_orig(x, ptr)
+#define __put_user(x, ptr) __put_user_orig(x, ptr)
+
+#endif
+
 #ifdef CONFIG_X86_WP_WORKS_OK
 
 /**
@@ -246,7 +280,7 @@ extern void __put_user_8(void);
  *
  * Returns zero on success, or -EFAULT on error.
  */
-#define put_user(x, ptr)					\
+#define put_user_orig(x, ptr)					\
 ({								\
 	int __ret_pu;						\
 	__typeof__(*(ptr)) __pu_val;				\
@@ -328,7 +362,7 @@ do {									\
 		retval = errret;					\
 } while (0)
 
-#define put_user(x, ptr)					\
+#define put_user_orig(x, ptr)					\
 ({								\
 	int __ret_pu;						\
 	__typeof__(*(ptr))__pus_tmp = x;			\
@@ -510,7 +544,7 @@ struct __large_struct { unsigned long buf[100]; };
  * Returns zero on success, or -EFAULT on error.
  */
 
-#define __put_user(x, ptr)						\
+#define __put_user_orig(x, ptr)						\
 	__put_user_nocheck((__typeof__(*(ptr)))(x), (ptr), sizeof(*(ptr)))
 
 #define __get_user_unaligned __get_user
