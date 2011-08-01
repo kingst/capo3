@@ -302,6 +302,18 @@ void rr_syscall_enter(struct pt_regs *regs) {
         }
 }
 
+/*
+static void print_stack(struct pt_regs *regs) {
+        unsigned long arg;
+        unsigned long start;
+
+        for(start = regs->sp; start < STACK_TOP; start += sizeof(arg)) {
+                if(copy_from_user(&arg, (void __user *) start, sizeof(arg)) == 0)
+                        printk(KERN_CRIT "%p: 0x%08lx\n", (void *) start, arg);
+        }
+}
+*/
+
 void rr_syscall_exit(struct pt_regs *regs) {
         rtcb_t *rtcb;
         sanity_check();

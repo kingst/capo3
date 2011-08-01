@@ -72,8 +72,11 @@ int main(void) {
         } else if(header.type == instruction_event) {
             cout << "instruction_event" << endl;
         } else if(header.type == execve_event) {
-            cout << "execve_event" << endl;
+            cout << "execve_event" << endl;            
             e = readExecveData();
+        } else if(header.type == copy_to_user_event) {
+            cout << "copy to user" << endl;
+            readBuffer();
         } else {
             assert(false);
         }

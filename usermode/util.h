@@ -49,5 +49,6 @@ struct execve_data {
 };
 
 struct execve_data *readExecveData(void);
+char *readBuffer(void);
 
 #endif

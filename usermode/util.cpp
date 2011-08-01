@@ -91,6 +91,28 @@ char *readString(void) {
     return str;
 }
 
+uint64_t readUInt64() {
+    int ret;
+    uint64_t u;;
+
+    ret = read(STDIN_FILENO, &u, sizeof(u));
+    assert(ret == sizeof(u));
+
+    return u;
+}
+
+// just throw away these results
+char *readBuffer(void) {
+    char *str;
+    uint64_t to_addr;
+
+    to_addr = readUInt64();
+    str = readString();
+    delete [] str;
+    
+    return NULL;
+}
+
 int32_t readInt32() {
     int ret;
     int32_t i;

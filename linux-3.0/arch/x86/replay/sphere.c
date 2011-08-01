@@ -58,6 +58,7 @@
 #include <linux/ptrace.h>
 #include <linux/kfifo.h>
 #include <linux/file.h>
+#include <linux/mman.h>
 
 #include <trace/syscall.h>
 #include <trace/events/syscalls.h>
@@ -446,11 +447,11 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
         return header;
 }
 
-static void replay_copy_to_user(replay_sphere_t *sphere) {
+static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
         uint64_t to_addr=0;
-        uint32_t len=0;
-        int ret;
-        char c;
+        uint32_t i, idx, ctu_len=0;
+        int ret, bytesWritten, len;
+        unsigned char c;
 
         sphere->fifo_head_ctu_buf = 1;
 
@@ -464,10 +465,11 @@ static void replay_copy_to_user(replay_sphere_t *sphere) {
         
         ret = kfifo_out(&sphere->fifo, &to_addr, sizeof(to_addr));
         if(ret != sizeof(to_addr)) BUG();
-        ret = kfifo_out(&sphere->fifo, &len, sizeof(len));
-        if(ret != sizeof(len)) BUG();
+        ret = kfifo_out(&sphere->fifo, &ctu_len, sizeof(ctu_len));
+        if(ret != sizeof(ctu_len)) BUG();
 
-        while(len > 0) {
+        idx = 0;
+        while(idx < ctu_len) {
                 ret = wait_event_interruptible_locked(sphere->replay_thread_wait, kfifo_len(&sphere->fifo) > 0);
                 
                 if(ret == -ERESTARTSYS) {
@@ -475,13 +477,21 @@ static void replay_copy_to_user(replay_sphere_t *sphere) {
                         return;
                 }
 
-                while(kfifo_len(&sphere->fifo) > 0) {
-                        ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
-                        if(ret != sizeof(c)) BUG();
-                        len--;
-                        if(len == 0)
-                                break;
+                len = kfifo_len(&sphere->fifo);
+                if(len > (ctu_len-idx))
+                        len = ctu_len-idx;
+                if(make_copy) {
+                        ret = kfifo_to_user(&sphere->fifo, (void __user *) (to_addr+idx), len, &bytesWritten);
+                        if(ret || (len != bytesWritten)) BUG();
+                } else {
+                        bytesWritten = len;
+                        for(i = 0; i < len; i++) {
+                                ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
+                                if(ret != sizeof(c)) BUG();
+                        }
                 }
+                idx += bytesWritten;
+                sphere_wake_usermode(sphere);                                
         }
 
         sphere->fifo_head_ctu_buf = 0;
@@ -489,6 +499,13 @@ static void replay_copy_to_user(replay_sphere_t *sphere) {
 }
 
 static int reexecute_syscall(struct pt_regs *regs) {
+        if(regs->orig_ax == __NR_mmap) {
+                if(regs->r10 == (MAP_ANONYMOUS | MAP_PRIVATE)) {
+                        return 1;
+                } else {
+                        BUG();
+                }
+        }
         switch (regs->orig_ax) {
 
         case __NR_execve: case __NR_brk: case __NR_arch_prctl:
@@ -497,7 +514,7 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
         case __NR_uname: case __NR_open: case __NR_read: case __NR_close:
         case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_fstat:
-        case __NR_ioctl: case __NR_mmap: case __NR_write:
+        case __NR_ioctl: case __NR_write: case __NR_getegid:
                 return 0;
 
         default:
@@ -524,7 +541,7 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("dx", regs->dx, stored_regs->dx);
         check_reg("si", regs->si, stored_regs->si);
         check_reg("di", regs->di, stored_regs->di);
-        check_reg("bp", regs->bp, stored_regs->bp);
+        check_reg("r9", regs->r9, stored_regs->r9);
         check_reg("ip", regs->ip, stored_regs->ip);
         check_reg("sp", regs->sp, stored_regs->sp);
 }
@@ -535,7 +552,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         replay_header_t *header;
         int is_ctu = 0;
 
-        printk(KERN_CRIT "replay_event type = %u, orig_ax = %u\n", event, regs->orig_ax);
+        printk(KERN_CRIT "replay_event type = %u, orig_ax = %lu\n", event, regs->orig_ax);
 
         do {
                 spin_lock(&sphere->replay_thread_wait.lock);
@@ -545,7 +562,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 
                 if(header->type == copy_to_user_event) {
                         is_ctu = 1;
-                        replay_copy_to_user(sphere);
+                        replay_copy_to_user(sphere, regs->orig_ax == __NR_getpid);
                 } else {
                         is_ctu = 0;
                         if(header->type != event)
@@ -564,6 +581,8 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 } else if(header->type == syscall_exit_event) {
                         if(regs->orig_ax == __NR_getpid)
                                 *regs = header->regs;
+                        if(regs->orig_ax == __NR_mmap)
+                                check_regs(regs, &header->regs);
                 } else if(header->type == instruction_event) {
                         // This is only for rdtsc for now, we can probably copy the entire regs struct
                         regs->ax = header->regs.ax;
