@@ -374,6 +374,7 @@ void rr_thread_exit(struct pt_regs *regs) {
         }
 
         sphere_thread_exit(rtcb->sphere);
+        current->rtcb = NULL;
 
         kfree(rtcb);
 }

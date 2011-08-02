@@ -459,6 +459,9 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
 
         sphere->fifo_head_ctu_buf = 1;
 
+        // reuse the same wait queue, but this time we have a different condition
+        // by setting fifo_head_ctu_buf = 1 we are ensuring that this thread
+        // will be the only one that wakes up
         ret = wait_event_interruptible_locked(sphere->replay_thread_wait,
                                               kfifo_len(&sphere->fifo) >= (sizeof(to_addr)+sizeof(len)));
 
@@ -511,8 +514,13 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
 static int reexecute_syscall(struct pt_regs *regs) {
         if(regs->orig_ax == __NR_mmap) {
                 if(regs->r10 == (MAP_ANONYMOUS | MAP_PRIVATE)) {
+                        // this is effectively a way for the system to
+                        // allocate memory, it is not backed by a file
                         return 1;
                 } else {
+                        // XXX FIXME for now I do not want to mess around
+                        // with the mmap optimization so I don't want to
+                        // support dlls.
                         BUG();
                 }
         }
@@ -586,6 +594,9 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
         }
 }
 
+// All of the replay helpers execute with the replay_thread_wait.lock held.  The wait
+// queue will release the lock when a thread waits, but ensures that it is held when
+// it resumes
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
         
@@ -598,6 +609,10 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 if(header == NULL)
                         BUG();
                 
+                // on emulated system calls we will get a number of copy to user
+                // log entries between the system call enter and exit events
+                // so we loop here on copy to user events until we finally
+                // get to the system call exit event
                 if(header->type == copy_to_user_event) {
                         is_ctu = 1;
                         replay_copy_to_user(sphere, regs->orig_ax == __NR_getpid);
