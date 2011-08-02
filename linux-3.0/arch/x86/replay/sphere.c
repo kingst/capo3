@@ -80,7 +80,7 @@ replay_sphere_t *sphere_alloc(void) {
         }
         memset(sphere, 0, sizeof(replay_sphere_t));
  
-        sphere->state = done;
+        atomic_set(&sphere->state, done);
         sphere->next_thread_id = 0;
         sphere->replay_first_execve = 0;
         sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
@@ -98,8 +98,7 @@ replay_sphere_t *sphere_alloc(void) {
         atomic_set(&sphere->fd_count, 0);
         sphere->header = NULL;
 
-        sphere->usermode_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
-        mutex_init(sphere->usermode_mutex);
+        mutex_init(&sphere->usermode_mutex);
 
         return sphere;
 }
@@ -108,7 +107,7 @@ void sphere_reset(replay_sphere_t *sphere) {
         spin_lock(&sphere->lock);
         if(sphere->num_threads > 0)
                 BUG();
-        sphere->state = idle;
+        atomic_set(&sphere->state, idle);
         sphere->next_thread_id = 1;
         sphere->replay_first_execve = 0;
         if(kfifo_len(&sphere->fifo) > 0)
@@ -119,24 +118,13 @@ void sphere_reset(replay_sphere_t *sphere) {
 }
 
 int sphere_is_recording_replaying(replay_sphere_t *sphere) {
-        int ret = 0;
-
-        spin_lock(&sphere->lock);
-        if((sphere->state == recording) || (sphere->state == replaying))
-                ret = 1;
-        spin_unlock(&sphere->lock);
-
-        return ret;
+        replay_state_t state = atomic_read(&sphere->state);
+        return (state == recording) || (state == replaying);
 }
 
 static int sphere_is_state(replay_sphere_t *sphere, uint32_t state) {
-        int ret=0;
-        spin_lock(&sphere->lock);
-        if(sphere->state == state)
-                ret = 1;
-        spin_unlock(&sphere->lock);
-
-        return ret;
+        replay_state_t s = atomic_read(&sphere->state);
+        return s == state;
 }
 
 int sphere_is_recording(replay_sphere_t *sphere) {
@@ -157,36 +145,23 @@ void sphere_dec_fd(replay_sphere_t *sphere) {
 }
 
 static int sphere_has_data(replay_sphere_t *sphere) {
-        int len, ret;
+        if(atomic_read(&sphere->state) == done)
+                return 1;
+        
+        if(kfifo_len(&sphere->fifo) > 0)
+                return 1;
 
-        spin_lock(&sphere->lock);
-        len = kfifo_len(&sphere->fifo);
-        ret = (len > 0) || (sphere->state == done);
-        spin_unlock(&sphere->lock);
-
-        return ret;
+        return 0;
 }
 
 static int sphere_is_done_recording(replay_sphere_t *sphere) {
-        spin_lock(&sphere->lock);
-        if((sphere->state == done) && (kfifo_len(&sphere->fifo) == 0)) {
-                spin_unlock(&sphere->lock);
-                return 1;
-        } else if(sphere->state == replaying) {
-                spin_unlock(&sphere->lock);
-                BUG();
-                return 1;
-        }
-        spin_unlock(&sphere->lock);
-
-        return 0;
+        return (atomic_read(&sphere->state) == done) && (kfifo_len(&sphere->fifo) == 0);
 }
 
 static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, size_t count) {
         int ret;
         int bytesRead=0;
         int flen;
-        replay_state_t state;
 
         if(sphere_is_done_recording(sphere))
                 return 0;
@@ -195,24 +170,17 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         if(ret)
                 return ret;
 
-        spin_lock(&sphere->lock);
         flen = kfifo_len(&sphere->fifo);
+        BUG_ON(flen < 0);
         if(flen == 0) {
-                state = sphere->state;
-                spin_unlock(&sphere->lock);
-                if(state != done)
-                        BUG();
+                BUG_ON(atomic_read(&sphere->state) != done);
                 return 0;
         }
 
         if(flen < count)
                 count = flen;
 
-        if(flen < 0)
-                BUG();
-
         ret = kfifo_to_user(&sphere->fifo, buf, count, &bytesRead);
-        spin_unlock(&sphere->lock);
 
         // it might return -EFAULT, which we will pass back
         if(ret)
@@ -223,9 +191,9 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
 
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
         int ret;
-        mutex_lock(sphere->usermode_mutex);
+        mutex_lock(&sphere->usermode_mutex);
         ret = sphere_fifo_to_user_ll(sphere, buf, count);
-        mutex_unlock(sphere->usermode_mutex);
+        mutex_unlock(&sphere->usermode_mutex);
         return ret;
 }
 
@@ -233,6 +201,7 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
         int ret;
         int bytesWritten=0;
         int favail;
+        replay_state_t state;
 
         ret = sphere_wait_usermode(sphere, 1);
         if(ret)
@@ -241,12 +210,8 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
         if(kfifo_is_full(&sphere->fifo))
                 BUG();
 
-        spin_lock(&sphere->lock);
-        if((sphere->state != replaying) && (sphere->state != idle)) {
-                spin_unlock(&sphere->lock);
-                BUG();
-                return -EINVAL;
-        }
+        state = atomic_read(&sphere->state);
+        BUG_ON((state != replaying) && (state != idle));
 
         favail = kfifo_avail(&sphere->fifo);
 
@@ -254,7 +219,6 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
                 count = favail;
 
         ret = kfifo_from_user(&sphere->fifo, buf, count, &bytesWritten);
-        spin_unlock(&sphere->lock);
 
         sphere_wake_rthreads(sphere);
 
@@ -267,9 +231,9 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
 
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
-        mutex_lock(sphere->usermode_mutex);
+        mutex_lock(&sphere->usermode_mutex);
         ret = sphere_fifo_from_user_ll(sphere, buf, count);
-        mutex_unlock(sphere->usermode_mutex);
+        mutex_unlock(&sphere->usermode_mutex);
         return ret;
 }
 
@@ -300,18 +264,18 @@ static void sphere_wake_usermode(replay_sphere_t *sphere) {
 }
 
 static int start_record_replay(replay_sphere_t *sphere, replay_state_t state) {
-        int num_threads;
+        int num_threads;                
+
+        // yes, I know that these are not atomic, but it is just for debugging
+        BUG_ON(atomic_read(&sphere->state) != idle);
+        atomic_set(&sphere->state, state);
+
+        // XXX FIXME should grab thread wait lock
         spin_lock(&sphere->lock);
-        if(sphere->state != idle) {
-                spin_unlock(&sphere->lock);
-                return -EINVAL;
-        }
-        sphere->state = state;
         num_threads = sphere->num_threads;
         spin_unlock(&sphere->lock);
-        
-        if(num_threads != 0)
-                BUG();
+
+        BUG_ON(num_threads != 0);
 
         return 0;
 }
@@ -343,7 +307,7 @@ void sphere_thread_exit(replay_sphere_t *sphere) {
         }
         
         if(sphere->num_threads == 0) {
-                sphere->state = done;
+                atomic_set(&sphere->state, done);
                 sphere_wake_usermode(sphere);
         }
         spin_unlock(&sphere->lock);
@@ -357,7 +321,7 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
         int ret;
         uint32_t type = (uint32_t) event;
 
-        if(sphere->state != recording)
+        if(atomic_read(&sphere->state) != recording)
                 BUG();
 
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
@@ -376,7 +340,7 @@ static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
                                 void *buf, uint32_t len) {
 
         int ret;
-        if(sphere->state != recording)
+        if(atomic_read(&sphere->state) != recording)
                 BUG();
 
         ret = kfifo_in(&sphere->fifo, &to_addr, sizeof(to_addr));

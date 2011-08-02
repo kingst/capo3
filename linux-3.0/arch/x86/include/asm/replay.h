@@ -24,17 +24,24 @@ typedef struct replay_header {
 typedef enum {idle, recording, replaying, done} replay_state_t;
 
 typedef struct replay_sphere {
-        replay_state_t state;
         unsigned char *fifo_buffer;
         spinlock_t lock;
+
+        // these variables can be touched by both usermode and rr threads
+        // so they need to be protected from each other
+        atomic_t state;
         struct kfifo fifo;
         wait_queue_head_t usermode_wait;
         wait_queue_head_t replay_thread_wait;
+
+        // these variables are only accessed by usermode
+        struct mutex usermode_mutex;
+        atomic_t fd_count;
+
+        // these variables are only accessed by rr threads
         int fifo_head_ctu_buf;
         uint32_t next_thread_id;
-        atomic_t fd_count;
         int num_threads;
-        struct mutex *usermode_mutex;
         replay_header_t *header;
         int replay_first_execve;
 } replay_sphere_t;
@@ -62,9 +69,12 @@ void sphere_dec_fd(replay_sphere_t *sphere);
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count);
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
 
-// from usermode calls but the first thread to record/replay calls these on itself
+// The first thread to record/replay calls these on itself
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
+
+// called from record/replay threads when allocated
+// might be called from context of a different thread
 uint32_t sphere_next_thread_id(replay_sphere_t *sphere);
 
 // calls from threads that are being recorded/replayed
