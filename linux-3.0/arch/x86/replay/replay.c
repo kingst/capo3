@@ -317,14 +317,8 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
 
         rtcb->sphere = sphere;
-        rtcb->thread_id = sphere_next_thread_id(sphere);
+        rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
         tsk->rtcb = rtcb;
-
-        if(sphere_is_recording(sphere)) {
-                record_header(rtcb->sphere, thread_create_event, rtcb->thread_id, regs);
-        } else {
-                replay_event(rtcb->sphere, thread_create_event, rtcb->thread_id, regs);
-        }
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
@@ -335,13 +329,7 @@ void rr_thread_exit(struct pt_regs *regs) {
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
 
-        if(sphere_is_recording(rtcb->sphere)) {
-                record_header(rtcb->sphere, thread_exit_event, rtcb->thread_id, regs);
-        } else {
-                replay_event(rtcb->sphere, thread_exit_event, rtcb->thread_id, regs);
-        }
-
-        sphere_thread_exit(rtcb->sphere);
+        sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
         current->rtcb = NULL;
 
         kfree(rtcb);

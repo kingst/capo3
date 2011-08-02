@@ -3,6 +3,7 @@ PATCHLEVEL = 0
 SUBLEVEL = 0
 EXTRAVERSION =
 NAME = Sneaky Weasel
+#CONFIG_DEBUG_INFO = y
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"

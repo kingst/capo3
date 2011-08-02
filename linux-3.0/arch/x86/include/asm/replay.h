@@ -25,14 +25,13 @@ typedef enum {idle, recording, replaying, done} replay_state_t;
 
 typedef struct replay_sphere {
         unsigned char *fifo_buffer;
-        spinlock_t lock;
 
         // these variables can be touched by both usermode and rr threads
         // so they need to be protected from each other
         atomic_t state;
         struct kfifo fifo;
         wait_queue_head_t usermode_wait;
-        wait_queue_head_t replay_thread_wait;
+        wait_queue_head_t rr_thread_wait;
 
         // these variables are only accessed by usermode
         struct mutex usermode_mutex;
@@ -62,6 +61,8 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(struct pt_regs *regs);
 
 // from usermode calls
+// for the two fifo calls as long as we have mutual exclution wrt
+// other reads/writes then we don't need any spinlocks
 replay_sphere_t *sphere_alloc(void);
 void sphere_reset(replay_sphere_t *sphere);
 void sphere_inc_fd(replay_sphere_t *sphere);
@@ -70,18 +71,23 @@ int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count)
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
 
 // The first thread to record/replay calls these on itself
+// holds the rr_thread_wait.lock
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
 
 // called from record/replay threads when allocated
 // might be called from context of a different thread
-uint32_t sphere_next_thread_id(replay_sphere_t *sphere);
+// holds the rr_thread_wait.lock
+void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs);
+uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs);
 
-// calls from threads that are being recorded/replayed
+// simple status calls
 int sphere_is_recording_replaying(replay_sphere_t *sphere);
 int sphere_is_recording(replay_sphere_t *sphere);
 int sphere_is_replaying(replay_sphere_t *sphere);
-void sphere_thread_exit(replay_sphere_t *sphere);
+
+// calls from threads that are being recorded/replayed
+// holds the rr_thread_wait.lock
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs);
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);

@@ -70,78 +70,17 @@
 static void sphere_wake_usermode(replay_sphere_t *sphere);
 static int sphere_wait_usermode(replay_sphere_t *sphere, int full);
 static void sphere_wake_rthreads(replay_sphere_t *sphere);
+static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                                struct pt_regs *regs);
+static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
+                                uint32_t thread_id, struct pt_regs *regs);
 
-replay_sphere_t *sphere_alloc(void) {
-        replay_sphere_t *sphere;
-        sphere = kmalloc(sizeof(replay_sphere_t), GFP_KERNEL);
-        if(sphere == NULL) {
-                BUG();
-                return NULL;
-        }
-        memset(sphere, 0, sizeof(replay_sphere_t));
- 
-        atomic_set(&sphere->state, done);
-        sphere->next_thread_id = 0;
-        sphere->replay_first_execve = 0;
-        sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
-        if(sphere->fifo_buffer == NULL) {
-                kfree(sphere);
-                BUG();
-                return NULL;
-        }
-        
-        spin_lock_init(&sphere->lock);
-        kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
-        init_waitqueue_head(&sphere->usermode_wait);
-        init_waitqueue_head(&sphere->replay_thread_wait);
-        sphere->num_threads = 0;
-        atomic_set(&sphere->fd_count, 0);
-        sphere->header = NULL;
 
-        mutex_init(&sphere->usermode_mutex);
-
-        return sphere;
-}
-
-void sphere_reset(replay_sphere_t *sphere) {
-        spin_lock(&sphere->lock);
-        if(sphere->num_threads > 0)
-                BUG();
-        atomic_set(&sphere->state, idle);
-        sphere->next_thread_id = 1;
-        sphere->replay_first_execve = 0;
-        if(kfifo_len(&sphere->fifo) > 0)
-                printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
-        kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
-        sphere->fifo_head_ctu_buf = 0;
-        spin_unlock(&sphere->lock);
-}
-
-int sphere_is_recording_replaying(replay_sphere_t *sphere) {
-        replay_state_t state = atomic_read(&sphere->state);
-        return (state == recording) || (state == replaying);
-}
+/********************************* Helpers for usermode ***************************************/
 
 static int sphere_is_state(replay_sphere_t *sphere, uint32_t state) {
         replay_state_t s = atomic_read(&sphere->state);
         return s == state;
-}
-
-int sphere_is_recording(replay_sphere_t *sphere) {
-        return sphere_is_state(sphere, recording);
-}
-
-int sphere_is_replaying(replay_sphere_t *sphere) {
-        return sphere_is_state(sphere, replaying);
-}
-
-void sphere_inc_fd(replay_sphere_t *sphere) {
-        atomic_inc(&sphere->fd_count);
-}
-
-void sphere_dec_fd(replay_sphere_t *sphere) {
-        if(atomic_dec_return(&sphere->fd_count) < 0)
-                BUG();
 }
 
 static int sphere_has_data(replay_sphere_t *sphere) {
@@ -189,14 +128,6 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         return bytesRead;
 }
 
-int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
-        int ret;
-        mutex_lock(&sphere->usermode_mutex);
-        ret = sphere_fifo_to_user_ll(sphere, buf, count);
-        mutex_unlock(&sphere->usermode_mutex);
-        return ret;
-}
-
 static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
         int bytesWritten=0;
@@ -229,13 +160,6 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
         return bytesWritten;
 }
 
-int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
-        int ret;
-        mutex_lock(&sphere->usermode_mutex);
-        ret = sphere_fifo_from_user_ll(sphere, buf, count);
-        mutex_unlock(&sphere->usermode_mutex);
-        return ret;
-}
 
 static int sphere_wait_usermode(replay_sphere_t *sphere, int full) {
         int ret;
@@ -263,55 +187,33 @@ static void sphere_wake_usermode(replay_sphere_t *sphere) {
         wake_up_interruptible(&sphere->usermode_wait);
 }
 
+/**********************************************************************************************/
+
+/************************* Helpers for starting/exiting threads *******************************/
+
 static int start_record_replay(replay_sphere_t *sphere, replay_state_t state) {
         int num_threads;                
 
-        // yes, I know that these are not atomic, but it is just for debugging
         BUG_ON(atomic_read(&sphere->state) != idle);
         atomic_set(&sphere->state, state);
 
-        // XXX FIXME should grab thread wait lock
-        spin_lock(&sphere->lock);
         num_threads = sphere->num_threads;
-        spin_unlock(&sphere->lock);
 
         BUG_ON(num_threads != 0);
 
         return 0;
 }
 
-int sphere_start_recording(replay_sphere_t *sphere) {
-        return start_record_replay(sphere, recording);
-}
-
-int sphere_start_replaying(replay_sphere_t *sphere) {
-        return start_record_replay(sphere, replaying);
-}
-
-uint32_t sphere_next_thread_id(replay_sphere_t *sphere) {
+static uint32_t sphere_next_thread_id(replay_sphere_t *sphere) {
         uint32_t id;
-        spin_lock(&sphere->lock);
+
         id = sphere->next_thread_id++;
         sphere->num_threads++;
-        spin_unlock(&sphere->lock);
 
         return id;
 }
 
-void sphere_thread_exit(replay_sphere_t *sphere) {
-        spin_lock(&sphere->lock);
-        sphere->num_threads--;
-        if(sphere->num_threads < 0) {
-                spin_unlock(&sphere->lock);
-                BUG();
-        }
-        
-        if(sphere->num_threads == 0) {
-                atomic_set(&sphere->state, done);
-                sphere_wake_usermode(sphere);
-        }
-        spin_unlock(&sphere->lock);
-}
+/**********************************************************************************************/
 
 
 /********************************** Helpers for recording *************************************/
@@ -355,43 +257,12 @@ static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
         return 0;
 }
 
-void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
-                   struct pt_regs *regs) {
-        int ret;
-
-        spin_lock(&sphere->lock);
-        ret = record_header_locked(sphere, event, thread_id, regs);
-        spin_unlock(&sphere->lock);
-
-        if(ret)
-                BUG();
-}
-
-void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len) {
-        int ret;
-        unsigned long flags;
-
-        spin_lock_irqsave(&sphere->lock, flags);
-        ret = record_header_locked(sphere, copy_to_user_event,
-                                   current->rtcb->thread_id, task_pt_regs(current));
-        if(ret) {
-                spin_unlock_irqrestore(&sphere->lock, flags);
-                BUG();
-                return;
-        }
-        ret = record_buffer_locked(sphere, to_addr, buf, len);
-        spin_unlock_irqrestore(&sphere->lock, flags);
-
-        if(ret)
-                BUG();
-}
-
 /**********************************************************************************************/
 
 /********************************* Helpers for replaying **************************************/
 
 static void sphere_wake_rthreads(replay_sphere_t *sphere) {
-        wake_up_interruptible_all(&sphere->replay_thread_wait);
+        wake_up_interruptible_all(&sphere->rr_thread_wait);
 }
 
 static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
@@ -421,7 +292,7 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
 }
 
 
-// for this function we are going to use the replay_thread_wait lock
+// for this function we are going to use the rr_thread_wait lock
 // and it will protect the sphere->header and the out end of the fifo. 
 // No other code should touch the sphere->header unless it holds this lock also
 //
@@ -430,7 +301,7 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
         int ret;
         replay_header_t *header;
 
-        ret = wait_event_interruptible_locked(sphere->replay_thread_wait, 
+        ret = wait_event_interruptible_locked(sphere->rr_thread_wait, 
                                               is_next_log(sphere, thread_id));
 
         if(ret == -ERESTARTSYS)
@@ -455,7 +326,7 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
         // reuse the same wait queue, but this time we have a different condition
         // by setting fifo_head_ctu_buf = 1 we are ensuring that this thread
         // will be the only one that wakes up
-        ret = wait_event_interruptible_locked(sphere->replay_thread_wait,
+        ret = wait_event_interruptible_locked(sphere->rr_thread_wait,
                                               kfifo_len(&sphere->fifo) >= (sizeof(to_addr)+sizeof(len)));
 
         if(ret == -ERESTARTSYS) {
@@ -470,7 +341,7 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
 
         idx = 0;
         while(idx < ctu_len) {
-                ret = wait_event_interruptible_locked(sphere->replay_thread_wait, kfifo_len(&sphere->fifo) > 0);
+                ret = wait_event_interruptible_locked(sphere->rr_thread_wait, kfifo_len(&sphere->fifo) > 0);
                 
                 if(ret == -ERESTARTSYS) {
                         BUG();
@@ -587,16 +458,14 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
         }
 }
 
-// All of the replay helpers execute with the replay_thread_wait.lock held.  The wait
+// All of the replay helpers execute with the rr_thread_wait.lock held.  The wait
 // queue will release the lock when a thread waits, but ensures that it is held when
 // it resumes
-void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
-                  struct pt_regs *regs) {
+static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                                struct pt_regs *regs) {
         
         replay_header_t *header;
         int is_ctu = 0;
-
-        spin_lock(&sphere->replay_thread_wait.lock);
         do {
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
@@ -621,8 +490,212 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 header = NULL;
 
         } while(is_ctu);
-        spin_unlock(&sphere->replay_thread_wait.lock);
+}
+
+/**********************************************************************************************/
+
+
+/******************************** Public functions ********************************************/
+
+// this is where all of the locking should take place
+
+replay_sphere_t *sphere_alloc(void) {
+        replay_sphere_t *sphere;
+        sphere = kmalloc(sizeof(replay_sphere_t), GFP_KERNEL);
+        if(sphere == NULL) {
+                BUG();
+                return NULL;
+        }
+        memset(sphere, 0, sizeof(replay_sphere_t));
+ 
+        atomic_set(&sphere->state, done);
+        sphere->next_thread_id = 0;
+        sphere->replay_first_execve = 0;
+        sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
+        if(sphere->fifo_buffer == NULL) {
+                kfree(sphere);
+                BUG();
+                return NULL;
+        }
+        
+        kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
+        init_waitqueue_head(&sphere->usermode_wait);
+        init_waitqueue_head(&sphere->rr_thread_wait);
+        sphere->num_threads = 0;
+        atomic_set(&sphere->fd_count, 0);
+        sphere->header = NULL;
+
+        mutex_init(&sphere->usermode_mutex);
+
+        return sphere;
+}
+
+void sphere_reset(replay_sphere_t *sphere) {
+        spin_lock(&sphere->rr_thread_wait.lock);
+        if(sphere->num_threads > 0)
+                BUG();
+        atomic_set(&sphere->state, idle);
+        sphere->next_thread_id = 1;
+        sphere->replay_first_execve = 0;
+        if(kfifo_len(&sphere->fifo) > 0)
+                printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
+        kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
+        sphere->fifo_head_ctu_buf = 0;
+        spin_unlock(&sphere->rr_thread_wait.lock);
+}
+
+int sphere_is_recording_replaying(replay_sphere_t *sphere) {
+        replay_state_t state = atomic_read(&sphere->state);
+        return (state == recording) || (state == replaying);
+}
+
+
+int sphere_is_recording(replay_sphere_t *sphere) {
+        return sphere_is_state(sphere, recording);
+}
+
+int sphere_is_replaying(replay_sphere_t *sphere) {
+        return sphere_is_state(sphere, replaying);
+}
+
+void sphere_inc_fd(replay_sphere_t *sphere) {
+        atomic_inc(&sphere->fd_count);
+}
+
+void sphere_dec_fd(replay_sphere_t *sphere) {
+        if(atomic_dec_return(&sphere->fd_count) < 0)
+                BUG();
+}
+
+int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(&sphere->usermode_mutex);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count);
+        mutex_unlock(&sphere->usermode_mutex);
+        return ret;
+}
+
+int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(&sphere->usermode_mutex);
+        ret = sphere_fifo_to_user_ll(sphere, buf, count);
+        mutex_unlock(&sphere->usermode_mutex);
+        return ret;
+}
+
+int sphere_start_recording(replay_sphere_t *sphere) {
+        int ret;
+        spin_lock(&sphere->rr_thread_wait.lock);
+        ret = start_record_replay(sphere, recording);
+        spin_unlock(&sphere->rr_thread_wait.lock);
+
+        return ret;
+}
+
+int sphere_start_replaying(replay_sphere_t *sphere) {
+        int ret;
+        spin_lock(&sphere->rr_thread_wait.lock);
+        ret = start_record_replay(sphere, replaying);
+        spin_unlock(&sphere->rr_thread_wait.lock);
+
+        return ret;
+}
+
+uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
+        uint32_t thread_id;
+        int wake = 0;
+
+        spin_lock(&sphere->rr_thread_wait.lock);
+        thread_id = sphere_next_thread_id(sphere);
+        if(sphere_is_recording(sphere)) {
+                record_header_locked(sphere, thread_create_event, thread_id, regs);
+        } else {
+                replay_event_locked(sphere, thread_create_event, thread_id, regs);
+                wake = 1;
+        }
+
+        spin_unlock(&sphere->rr_thread_wait.lock);
+
+        // need this wake call because we replayed an event using
+        // replay_event_locked
+        if(wake)
+                sphere_wake_rthreads(sphere);
+
+        return thread_id;
+
+}
+
+void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs) {
+        int wake = 0;
+        int wake_r = 0;
+
+        spin_lock(&sphere->rr_thread_wait.lock);
+        if(sphere_is_recording(sphere)) {
+                record_header_locked(sphere, thread_exit_event, thread_id, regs);
+        } else {
+                replay_event_locked(sphere, thread_exit_event, thread_id, regs);
+                wake_r = 1;
+        }
+
+        sphere->num_threads--;
+        BUG_ON(sphere->num_threads < 0);
+        
+        if(sphere->num_threads == 0) {
+                atomic_set(&sphere->state, done);
+                wake = 1;
+        }
+        spin_unlock(&sphere->rr_thread_wait.lock);
+
+        if(wake)
+                sphere_wake_usermode(sphere);
+
+        // need this wake call because we replayed an event using
+        // replay_event_locked
+        if(wake_r)
+                sphere_wake_rthreads(sphere);
+}
+
+
+void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                   struct pt_regs *regs) {
+        int ret;
+
+        spin_lock(&sphere->rr_thread_wait.lock);
+        ret = record_header_locked(sphere, event, thread_id, regs);
+        spin_unlock(&sphere->rr_thread_wait.lock);
+
+        if(ret)
+                BUG();
+}
+
+void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len) {
+        int ret;
+        unsigned long flags;
+
+        spin_lock_irqsave(&sphere->rr_thread_wait.lock, flags);
+        ret = record_header_locked(sphere, copy_to_user_event,
+                                   current->rtcb->thread_id, task_pt_regs(current));
+        if(ret) {
+                spin_unlock_irqrestore(&sphere->rr_thread_wait.lock, flags);
+                BUG();
+                return;
+        }
+        ret = record_buffer_locked(sphere, to_addr, buf, len);
+        spin_unlock_irqrestore(&sphere->rr_thread_wait.lock, flags);
+
+        if(ret)
+                BUG();
+}
+
+
+void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
+                  struct pt_regs *regs) {
+        spin_lock(&sphere->rr_thread_wait.lock);
+        replay_event_locked(sphere, event, thread_id, regs);
+        spin_unlock(&sphere->rr_thread_wait.lock);
         sphere_wake_rthreads(sphere);
 }
+
+
 
 /**********************************************************************************************/
