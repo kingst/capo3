@@ -68,6 +68,8 @@
 #define LOG_BUFFER_SIZE (8*1024*1024)
 
 static void sphere_wake_usermode(replay_sphere_t *sphere);
+static int sphere_wait_usermode(replay_sphere_t *sphere, int full);
+static void sphere_wake_rthreads(replay_sphere_t *sphere);
 
 replay_sphere_t *sphere_alloc(void) {
         replay_sphere_t *sphere;
@@ -94,9 +96,10 @@ replay_sphere_t *sphere_alloc(void) {
         init_waitqueue_head(&sphere->replay_thread_wait);
         sphere->num_threads = 0;
         atomic_set(&sphere->fd_count, 0);
-        atomic_set(&sphere->num_readers, 0);
-        atomic_set(&sphere->num_writers, 0);
         sphere->header = NULL;
+
+        sphere->usermode_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
+        mutex_init(sphere->usermode_mutex);
 
         return sphere;
 }
@@ -164,7 +167,7 @@ static int sphere_has_data(replay_sphere_t *sphere) {
         return ret;
 }
 
-int sphere_is_done_recording(replay_sphere_t *sphere) {
+static int sphere_is_done_recording(replay_sphere_t *sphere) {
         spin_lock(&sphere->lock);
         if((sphere->state == done) && (kfifo_len(&sphere->fifo) == 0)) {
                 spin_unlock(&sphere->lock);
@@ -179,11 +182,18 @@ int sphere_is_done_recording(replay_sphere_t *sphere) {
         return 0;
 }
 
-int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
+static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, size_t count) {
         int ret;
         int bytesRead=0;
         int flen;
         replay_state_t state;
+
+        if(sphere_is_done_recording(sphere))
+                return 0;
+
+        ret = sphere_wait_usermode(sphere, 0);
+        if(ret)
+                return ret;
 
         spin_lock(&sphere->lock);
         flen = kfifo_len(&sphere->fifo);
@@ -211,10 +221,22 @@ int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count)
         return bytesRead;
 }
 
-int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(sphere->usermode_mutex);
+        ret = sphere_fifo_to_user_ll(sphere, buf, count);
+        mutex_unlock(sphere->usermode_mutex);
+        return ret;
+}
+
+static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
         int bytesWritten=0;
-        int flen, favail;
+        int favail;
+
+        ret = sphere_wait_usermode(sphere, 1);
+        if(ret)
+                return ret;
 
         if(kfifo_is_full(&sphere->fifo))
                 BUG();
@@ -226,7 +248,6 @@ int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_
                 return -EINVAL;
         }
 
-        flen = kfifo_len(&sphere->fifo);
         favail = kfifo_avail(&sphere->fifo);
 
         if(favail < count)
@@ -244,7 +265,15 @@ int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_
         return bytesWritten;
 }
 
-int sphere_wait_usermode(replay_sphere_t *sphere, int full) {
+int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(sphere->usermode_mutex);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count);
+        mutex_unlock(sphere->usermode_mutex);
+        return ret;
+}
+
+static int sphere_wait_usermode(replay_sphere_t *sphere, int full) {
         int ret;
         
         if(current->rtcb)
@@ -397,7 +426,7 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 
 /********************************* Helpers for replaying **************************************/
 
-void sphere_wake_rthreads(replay_sphere_t *sphere) {
+static void sphere_wake_rthreads(replay_sphere_t *sphere) {
         wake_up_interruptible_all(&sphere->replay_thread_wait);
 }
 

@@ -111,9 +111,7 @@ static int replay_release(struct inode *inode, struct file *file) {
 
 static ssize_t replay_write(struct file *file, const char __user *buf, size_t count,
                             loff_t *f_pos) {
-        int ret = 0;
         replay_sphere_t *sphere;
-        ssize_t bytesWritten;
 
         sphere = (replay_sphere_t *) file->private_data;
         if(sphere == NULL) {
@@ -125,27 +123,12 @@ static ssize_t replay_write(struct file *file, const char __user *buf, size_t co
                 return -EINVAL;
         }
 
-        if(atomic_inc_return(&sphere->num_writers) > 1)
-                return -EINVAL;
-
-        ret = sphere_wait_usermode(sphere, 1);
-        if(ret) {
-                atomic_dec(&sphere->num_writers);
-                return ret;
-        }
-        
-        bytesWritten = sphere_fifo_from_user(sphere, buf, count);
-
-        atomic_dec(&sphere->num_writers);
-        
-        return bytesWritten;
+        return sphere_fifo_from_user(sphere, buf, count);
 }
 
 static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
                              loff_t *f_pos) {
-        int ret = 0;
         replay_sphere_t *sphere;
-        int bytesCopied=0;
 
         sphere = (replay_sphere_t *) file->private_data;
         if(sphere == NULL) {
@@ -156,23 +139,8 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
                 BUG();
                 return -EINVAL;
         }
-
-        if(sphere_is_done_recording(sphere))
-                return 0;
-
-        if(atomic_inc_return(&sphere->num_readers) > 1)
-                return -EINVAL;
-
-        ret = sphere_wait_usermode(sphere, 0);
-        if(ret) {
-                atomic_dec(&sphere->num_readers);
-                return ret;
-        }
-        bytesCopied = sphere_fifo_to_user(sphere, buf, count);
         
-        atomic_dec(&sphere->num_readers);
-
-        return bytesCopied;
+        return sphere_fifo_to_user(sphere, buf, count);
 }
 
 static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {

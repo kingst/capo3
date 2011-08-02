@@ -34,8 +34,7 @@ typedef struct replay_sphere {
         uint32_t next_thread_id;
         atomic_t fd_count;
         int num_threads;
-        atomic_t num_readers;
-        atomic_t num_writers;
+        struct mutex *usermode_mutex;
         replay_header_t *header;
         int replay_first_execve;
 } replay_sphere_t;
@@ -55,27 +54,27 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(struct pt_regs *regs);
 
+// from usermode calls
 replay_sphere_t *sphere_alloc(void);
 void sphere_reset(replay_sphere_t *sphere);
-int sphere_is_recording_replaying(replay_sphere_t *sphere);
-int sphere_is_recording(replay_sphere_t *sphere);
-int sphere_is_replaying(replay_sphere_t *sphere);
 void sphere_inc_fd(replay_sphere_t *sphere);
 void sphere_dec_fd(replay_sphere_t *sphere);
-int sphere_is_done_recording(replay_sphere_t *sphere);
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count);
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
-int sphere_wait_usermode(replay_sphere_t *sphere, int full);
+
+// from usermode calls but the first thread to record/replay calls these on itself
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
 uint32_t sphere_next_thread_id(replay_sphere_t *sphere);
-void sphere_thread_exit(replay_sphere_t *sphere);
-void sphere_wake_rthreads(replay_sphere_t *sphere);
 
+// calls from threads that are being recorded/replayed
+int sphere_is_recording_replaying(replay_sphere_t *sphere);
+int sphere_is_recording(replay_sphere_t *sphere);
+int sphere_is_replaying(replay_sphere_t *sphere);
+void sphere_thread_exit(replay_sphere_t *sphere);
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs);
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
-
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs);
 
