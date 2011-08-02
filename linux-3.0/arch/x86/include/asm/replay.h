@@ -12,9 +12,9 @@ typedef enum {invalid_event=0, execve_event, syscall_enter_event,
               instruction_event, copy_to_user_event, signal_event} replay_event_t;
 
 typedef struct replay_header {
-    uint32_t type;
-    uint32_t thread_id;
-    struct pt_regs regs;
+        uint32_t type;
+        uint32_t thread_id;
+        struct pt_regs regs;
 } replay_header_t;
 
 #ifdef __KERNEL__
@@ -37,6 +37,7 @@ typedef struct replay_sphere {
         atomic_t num_readers;
         atomic_t num_writers;
         replay_header_t *header;
+        int replay_first_execve;
 } replay_sphere_t;
 
 

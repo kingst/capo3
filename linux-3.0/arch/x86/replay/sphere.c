@@ -80,6 +80,7 @@ replay_sphere_t *sphere_alloc(void) {
  
         sphere->state = done;
         sphere->next_thread_id = 0;
+        sphere->replay_first_execve = 0;
         sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
         if(sphere->fifo_buffer == NULL) {
                 kfree(sphere);
@@ -106,6 +107,7 @@ void sphere_reset(replay_sphere_t *sphere) {
                 BUG();
         sphere->state = idle;
         sphere->next_thread_id = 1;
+        sphere->replay_first_execve = 0;
         if(kfifo_len(&sphere->fifo) > 0)
                 printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
@@ -402,6 +404,8 @@ void sphere_wake_rthreads(replay_sphere_t *sphere) {
 static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         int len, ret;
 
+        // if someone is in the middle of processing a copy to
+        // user buffer, just exit immediately
         if(sphere->fifo_head_ctu_buf)
                 return 0;
 
@@ -481,12 +485,16 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                 if(len > (ctu_len-idx))
                         len = ctu_len-idx;
                 if(make_copy) {
-                        ret = kfifo_to_user(&sphere->fifo, (void __user *) (to_addr+idx), len, &bytesWritten);
+                        // this is for an emulated system call, we need to replay
+                        // the copy to user calls to emulate it properly
+                        ret = kfifo_to_user(&sphere->fifo, (void __user *) (to_addr+idx), len, 
+                                            &bytesWritten);
                         if(ret || (len != bytesWritten)) BUG();
                 } else {
+                        // we are re-executing so squash the copy to user logs
                         bytesWritten = len;
-                        // XXX FIXME we should put something here to check and make sure the values
-                        // are the same
+                        // XXX FIXME we should put something here to check and make 
+                        // sure the values are the same
                         for(i = 0; i < len; i++) {
                                 ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
                                 if(ret != sizeof(c)) BUG();
@@ -550,14 +558,42 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("sp", regs->sp, stored_regs->sp);
 }
 
+static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
+                                struct pt_regs *regs, replay_header_t *header) {
+        
+        if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve))
+                sphere->replay_first_execve = 1;
+
+        if(header->type == syscall_enter_event) {
+                if(sphere->replay_first_execve)
+                        check_regs(regs, &header->regs);
+                if(!reexecute_syscall(regs))
+                        regs->orig_ax = __NR_getpid;
+        } else if(header->type == syscall_exit_event) {                
+                if(regs->orig_ax == __NR_getpid) {
+                        // emulate system call by copying registers
+                        *regs = header->regs;
+                } else if(sphere->replay_first_execve) {
+                        // re-executed syscall, check regs to make sure
+                        // everything is on track after first execve
+                        check_regs(regs, &header->regs);
+                }
+        } else if(header->type == instruction_event) {
+                // This is only for rdtsc for now, we can probably copy the entire regs struct
+                regs->ax = header->regs.ax;
+                regs->dx = header->regs.dx;
+                regs->ip = header->regs.ip;
+        }
+}
+
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
         
         replay_header_t *header;
         int is_ctu = 0;
 
+        spin_lock(&sphere->replay_thread_wait.lock);
         do {
-                spin_lock(&sphere->replay_thread_wait.lock);
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
                         BUG();
@@ -571,30 +607,14 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                                 BUG();
                 }
 
-                spin_unlock(&sphere->replay_thread_wait.lock);
-                sphere_wake_rthreads(sphere);                
+                replay_handle_event(sphere, event, regs, header);
 
-                if(header->type == syscall_enter_event) {
-                        // XXX FIXME: should diable checking until after first execve return
-                        if(regs->orig_ax != __NR_execve)
-                                check_regs(regs, &header->regs);
-                        if(!reexecute_syscall(regs))
-                                regs->orig_ax = __NR_getpid;
-                } else if(header->type == syscall_exit_event) {
-                        if(regs->orig_ax == __NR_getpid)
-                                *regs = header->regs;
-                        if(regs->orig_ax == __NR_mmap)
-                                check_regs(regs, &header->regs);
-                } else if(header->type == instruction_event) {
-                        // This is only for rdtsc for now, we can probably copy the entire regs struct
-                        regs->ax = header->regs.ax;
-                        regs->dx = header->regs.dx;
-                        regs->ip = header->regs.ip;
-                }
+                kfree(header);
+                header = NULL;
+
         } while(is_ctu);
-
-
-        kfree(header);
+        spin_unlock(&sphere->replay_thread_wait.lock);
+        sphere_wake_rthreads(sphere);
 }
 
 /**********************************************************************************************/
