@@ -264,7 +264,14 @@ __copy_from_user_inatomic(void *dst, const void __user *src, unsigned size)
 static __must_check __always_inline int
 __copy_to_user_inatomic(void __user *dst, const void *src, unsigned size)
 {
-	return copy_user_generic((__force void *)dst, src, size);
+#ifdef CONFIG_RECORD_REPLAY
+        int ret = copy_user_generic((__force void *)dst, src, size);
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
+                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+	return ret;
+#else
+        return copy_user_generic((__force void *)dst, src, size);
+#endif
 }
 
 extern long __copy_user_nocache(void *dst, const void __user *src,

@@ -59,6 +59,7 @@
 #include <linux/kfifo.h>
 #include <linux/file.h>
 #include <linux/mman.h>
+#include <linux/syscalls.h>
 
 #include <trace/syscall.h>
 #include <trace/events/syscalls.h>
@@ -376,27 +377,24 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
 }
 
 static int reexecute_syscall(struct pt_regs *regs) {
-        if(regs->orig_ax == __NR_mmap) {
-                if(regs->r10 == (MAP_ANONYMOUS | MAP_PRIVATE)) {
-                        // this is effectively a way for the system to
-                        // allocate memory, it is not backed by a file
-                        return 1;
-                } else {
-                        // XXX FIXME for now I do not want to mess around
-                        // with the mmap optimization so I don't want to
-                        // support dlls.
-                        BUG();
-                }
+        // this is for the mmap optimization, for dlls we assume that they exist on the 
+        // system that is replaying and that opening an existing file with O_RDONLY will
+        // not affect it
+        if(regs->orig_ax == __NR_open) {
+                return (regs->dx == O_RDONLY);
         }
+
         switch (regs->orig_ax) {
 
         case __NR_execve: case __NR_brk: case __NR_arch_prctl:
-        case __NR_exit_group:
+        case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
+        case __NR_mprotect: case __NR_exit:
                 return 1;
 
-        case __NR_uname: case __NR_open: case __NR_read: case __NR_close:
+        case __NR_uname: case __NR_read: case __NR_close: case __NR_stat:
         case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_fstat:
-        case __NR_ioctl: case __NR_write: case __NR_getegid:
+        case __NR_ioctl: case __NR_write: case __NR_getegid: case __NR_time:
+        case __NR_fcntl: case __NR_getdents: case __NR_lstat:
                 return 0;
 
         default:
@@ -417,6 +415,8 @@ static void check_reg(char *reg, unsigned long a, unsigned long b) {
 static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         // for now we will just check syscall parameters and a few others
         check_reg("orig_ax", regs->orig_ax, stored_regs->orig_ax);
+        check_reg("ip", regs->ip, stored_regs->ip);
+        check_reg("sp", regs->sp, stored_regs->sp);
         check_reg("ax", regs->ax, stored_regs->ax);
         check_reg("cx", regs->cx, stored_regs->cx);
         check_reg("dx", regs->dx, stored_regs->dx);
@@ -426,13 +426,10 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("r9", regs->r9, stored_regs->r9);
         check_reg("r10", regs->r10, stored_regs->r10);
         check_reg("r11", regs->r11, stored_regs->r11);
-        check_reg("ip", regs->ip, stored_regs->ip);
-        check_reg("sp", regs->sp, stored_regs->sp);
 }
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
-        
         if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve))
                 sphere->replay_first_execve = 1;
 
@@ -445,11 +442,30 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
                 if(regs->orig_ax == __NR_getpid) {
                         // emulate system call by copying registers
                         *regs = header->regs;
+                } else if(regs->orig_ax == __NR_open) {
+                        // we let an open through, fixup the fd
+                        if(regs->ax != header->regs.ax) {
+                                BUG_ON((regs->ax < 0) || (header->regs.ax < 0));
+                                sys_dup2(regs->ax, header->regs.ax);
+                                sys_close(regs->ax);
+                                regs->ax = header->regs.ax;
+                        }
+                        check_regs(regs, &header->regs);
+                } else if(header->regs.orig_ax == __NR_close) {
+                        // this is for our mmap optimzation
+                        sys_close(regs->di);
+                        *regs = header->regs;
+                } else if((header->regs.orig_ax == __NR_dup) ||
+                          (header->regs.orig_ax == __NR_dup2) ||
+                          (header->regs.orig_ax == __NR_dup3)) {
+                        // we need to re-execute these if one of the
+                        // fds we opened would be affected
                 } else if(sphere->replay_first_execve) {
                         // re-executed syscall, check regs to make sure
                         // everything is on track after first execve
                         check_regs(regs, &header->regs);
                 }
+
         } else if(header->type == instruction_event) {
                 // This is only for rdtsc for now, we can probably copy the entire regs struct
                 regs->ax = header->regs.ax;
