@@ -428,6 +428,40 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("r11", regs->r11, stored_regs->r11);
 }
 
+static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
+        BUG_ON(header->type != syscall_exit_event);
+
+        if(regs->orig_ax == __NR_open) {
+                // we let an open through, fixup the fd
+                if(regs->ax != header->regs.ax) {
+                        BUG_ON((regs->ax < 0) && (header->regs.ax >= 0));
+                        if((regs->ax >= 0) && (header->regs.ax < 0)) {
+                                // failed during recording, but not now, clean up
+                                sys_close(regs->ax);
+                        } else if(regs->ax != header->regs.ax) {
+                                // opened, but with different fd, fixup needed
+                                BUG_ON((regs->ax < 0) || (header->regs.ax < 0));
+                                sys_dup2(regs->ax, header->regs.ax);
+                                sys_close(regs->ax);
+                        } else {
+                                BUG_ON(regs->ax != header->regs.ax);
+                        }
+                        regs->ax = header->regs.ax;
+                }
+                check_regs(regs, &header->regs);
+        } else if(header->regs.orig_ax == __NR_close) {
+                // this is for our mmap optimzation
+                sys_close(regs->di);
+                *regs = header->regs;
+        } else if((header->regs.orig_ax == __NR_dup) ||
+                  (header->regs.orig_ax == __NR_dup2) ||
+                  (header->regs.orig_ax == __NR_dup3)) {
+                // XXX FIXME
+                // we need to re-execute these if one of the
+                // fds is from our previous open
+       }
+}
+
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
         if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve))
@@ -439,27 +473,11 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
                 if(!reexecute_syscall(regs))
                         regs->orig_ax = __NR_getpid;
         } else if(header->type == syscall_exit_event) {                
+                handle_mmap_optimization(regs, header);
+                
                 if(regs->orig_ax == __NR_getpid) {
                         // emulate system call by copying registers
                         *regs = header->regs;
-                } else if(regs->orig_ax == __NR_open) {
-                        // we let an open through, fixup the fd
-                        if(regs->ax != header->regs.ax) {
-                                BUG_ON((regs->ax < 0) || (header->regs.ax < 0));
-                                sys_dup2(regs->ax, header->regs.ax);
-                                sys_close(regs->ax);
-                                regs->ax = header->regs.ax;
-                        }
-                        check_regs(regs, &header->regs);
-                } else if(header->regs.orig_ax == __NR_close) {
-                        // this is for our mmap optimzation
-                        sys_close(regs->di);
-                        *regs = header->regs;
-                } else if((header->regs.orig_ax == __NR_dup) ||
-                          (header->regs.orig_ax == __NR_dup2) ||
-                          (header->regs.orig_ax == __NR_dup3)) {
-                        // we need to re-execute these if one of the
-                        // fds we opened would be affected
                 } else if(sphere->replay_first_execve) {
                         // re-executed syscall, check regs to make sure
                         // everything is on track after first execve
