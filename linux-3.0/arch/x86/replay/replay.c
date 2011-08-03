@@ -257,14 +257,34 @@ static void sanity_check(void) {
                 BUG();
 }
 
+static int get_signr(rtcb_t *rtcb) {
+        int idx;
+        uint64_t def_sig = rtcb->def_sig;
+
+        for(idx = 0; idx < 64; idx++) {
+                if(def_sig & (1<<idx)) {
+                        rtcb->def_sig = (def_sig & ~(1<<idx));
+                        return idx;
+                }
+        }
+
+        BUG();
+        return -1;       
+}
+
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
+        int signr;
         sanity_check();
 
         rtcb = current->rtcb;
 
         if(sphere_is_recording(rtcb->sphere)) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+                if(rtcb->def_sig) {
+                        signr = get_signr(rtcb);
+                        send_sig(signr, current, 1);
+                }
         } else {
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
@@ -325,6 +345,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
 
         rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
+        memset(rtcb, 0, sizeof(rtcb_t));
 
         rtcb->sphere = sphere;
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);

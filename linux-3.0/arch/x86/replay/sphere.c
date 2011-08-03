@@ -380,9 +380,8 @@ static int reexecute_syscall(struct pt_regs *regs) {
         // this is for the mmap optimization, for dlls we assume that they exist on the 
         // system that is replaying and that opening an existing file with O_RDONLY will
         // not affect it
-        if(regs->orig_ax == __NR_open) {
-                return (regs->dx == O_RDONLY);
-        }
+        if(regs->orig_ax == __NR_open)
+                return (regs->si == O_RDONLY);
 
         switch (regs->orig_ax) {
 
@@ -398,7 +397,7 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_shmget: case __NR_shmat: case __NR_shmctl: case __NR_shutdown:
         case __NR_clone: case __NR_fork: case __NR_vfork: case __NR_shmdt:
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
-        case __NR_ioperm: case __NR_futex: case __NR_setsid:
+        case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
                 BUG();
                 return 1;
@@ -504,6 +503,13 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         
         replay_header_t *header;
         int is_ctu = 0;
+
+        if((event == syscall_enter_event) || (event == syscall_exit_event)) {
+                printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs->orig_ax);
+        } else {
+                printk(KERN_CRIT "event %u\n", event);
+        }
+
         do {
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
@@ -528,6 +534,8 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 header = NULL;
 
         } while(is_ctu);
+
+        printk(KERN_CRIT "done with event\n");
 }
 
 /**********************************************************************************************/
