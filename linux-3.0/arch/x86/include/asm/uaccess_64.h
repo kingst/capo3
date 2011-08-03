@@ -11,6 +11,10 @@
 #include <asm/cpufeature.h>
 #include <asm/page.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
+#endif
+
 /*
  * Copy To/From Userspace
  */

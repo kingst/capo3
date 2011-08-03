@@ -58,7 +58,7 @@ void rr_thread_exit(struct pt_regs *regs);
 void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p);
 int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
-void rr_send_signal(struct pt_regs *regs);
+void rr_send_signal(int signo);
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt

@@ -10,10 +10,6 @@
 #include <asm/asm.h>
 #include <asm/page.h>
 
-#ifdef CONFIG_RECORD_REPLAY
-#include <asm/replay.h>
-#endif
-
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
 

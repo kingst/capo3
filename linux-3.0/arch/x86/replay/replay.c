@@ -295,12 +295,22 @@ void rr_syscall_exit(struct pt_regs *regs) {
         }
 }
 
-void rr_send_signal(struct pt_regs *regs) {
+void rr_send_signal(int signo) {
+        unsigned long orig_ax;
+        struct pt_regs *regs;
         sanity_check();
 
-        record_header(current->rtcb->sphere, signal_event, 
-                      current->rtcb->thread_id, regs);
-        BUG();
+        regs = task_pt_regs(current);
+
+        if(sphere_is_recording(current->rtcb->sphere)) {
+                orig_ax = regs->orig_ax;
+                regs->orig_ax = signo;
+                record_header(current->rtcb->sphere, signal_event, 
+                              current->rtcb->thread_id, regs);
+                regs->orig_ax = orig_ax;
+        } else {
+                BUG();
+        }
 }
 
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
