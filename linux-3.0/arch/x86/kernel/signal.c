@@ -784,6 +784,11 @@ static void do_signal(struct pt_regs *regs)
 	else
 		oldset = &current->blocked;
 
+#ifdef CONFIG_RECORD_REPLAY
+    printk(KERN_CRIT "Delivering a signal!\n");
+    if(test_thread_flag(TIF_RECORD_REPLAY))
+        rr_send_signal(&regs);
+#endif
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 	if (signr > 0) {
 		/* Whee! Actually deliver the signal.  */
@@ -798,7 +803,7 @@ static void do_signal(struct pt_regs *regs)
 		}
 		return;
 	}
-
+    
 	/* Did we come from a system call? */
 	if (syscall_get_nr(current, regs) >= 0) {
 		/* Restart the system call - no handlers present */
