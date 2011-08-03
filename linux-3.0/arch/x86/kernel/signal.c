@@ -37,6 +37,10 @@
 
 #include <asm/sigframe.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 #define _BLOCKABLE (~(sigmask(SIGKILL) | sigmask(SIGSTOP)))
 
 #define __FIX_EFLAGS	(X86_EFLAGS_AC | X86_EFLAGS_OF | \
@@ -757,6 +761,33 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	test_thread_flag(TIF_IA32) ? __NR_ia32_restart_syscall : __NR_restart_syscall
 #endif /* CONFIG_X86_32 */
 
+#ifdef CONFIG_RECORD_REPLAY
+static int rr_deliver_signal(int signr, struct pt_regs *regs) {
+        int async = 0;
+
+        switch(async) {
+        case SIGALRM: case SIGUSR1: case SIGCHLD: case SIGHUP: case SIGINT: 
+        case SIGPIPE: case SIGUSR2: case SIGKILL: case SIGVTALRM:
+                async = 1;
+                break;
+        }
+
+        // check if this is an async signal
+        if(!async)
+                return signr;
+
+        // check if we are at a system call boundary.  if not, defer the signal
+        // until later when we are at a syscall boundary.
+        if(syscall_get_nr(current, regs) < 0) {
+                BUG_ON(signr >= 64);
+                current->rtcb->def_sig |= (1<<signr);
+                return -1;
+        }
+
+        return signr;
+}
+#endif
+
 /*
  * Note that 'init' is a special process: it doesn't get signals it doesn't
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
@@ -784,15 +815,17 @@ static void do_signal(struct pt_regs *regs)
 	else
 		oldset = &current->blocked;
 
-#ifdef CONFIG_RECORD_REPLAY
-    printk(KERN_CRIT "Delivering a signal!\n");
-    if(test_thread_flag(TIF_RECORD_REPLAY))
-        rr_send_signal(&regs);
-#endif
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
+
+#ifdef CONFIG_RECORD_REPLAY
+        printk(KERN_CRIT "Delivering a signal!\n");
+        if(test_thread_flag(TIF_RECORD_REPLAY))
+                signr = rr_deliver_signal(signr, regs);
+#endif
+
 	if (signr > 0) {
 		/* Whee! Actually deliver the signal.  */
-		if (handle_signal(signr, &info, &ka, oldset, regs) == 0) {
+		if (handle_signal(signr, &info, &ka, oldset, regs) == 0) {                        
 			/*
 			 * A signal was successfully delivered; the saved
 			 * sigmask will have been stored in the signal frame,
@@ -800,6 +833,12 @@ static void do_signal(struct pt_regs *regs)
 			 * clear the TS_RESTORE_SIGMASK flag.
 			 */
 			current_thread_info()->status &= ~TS_RESTORE_SIGMASK;
+
+#ifdef CONFIG_RECORD_REPLAY
+                        if(test_thread_flag(TIF_RECORD_REPLAY))
+                                rr_send_signal(signr);
+#endif
+
 		}
 		return;
 	}

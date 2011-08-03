@@ -49,6 +49,7 @@ typedef struct replay_sphere {
 typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
         uint32_t thread_id;
+        uint64_t def_sig;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
