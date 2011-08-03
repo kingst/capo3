@@ -388,20 +388,24 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
         case __NR_execve: case __NR_brk: case __NR_arch_prctl:
         case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
-        case __NR_mprotect: case __NR_exit:
+        case __NR_mprotect: case __NR_exit: case __NR_mlock:
+        case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
+
+        case __NR_rt_sigaction: case __NR_rt_sigprocmask: case __NR_rt_sigreturn:
+        case __NR_sigaltstack:
                 return 1;
 
-        case __NR_uname: case __NR_read: case __NR_close: case __NR_stat:
-        case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_fstat:
-        case __NR_ioctl: case __NR_write: case __NR_getegid: case __NR_time:
-        case __NR_fcntl: case __NR_getdents: case __NR_lstat:
-                return 0;
-
-        default:
-                printk(KERN_CRIT "unhandled syscall %lu\n", regs->orig_ax);
+        case __NR_shmget: case __NR_shmat: case __NR_shmctl: case __NR_shutdown:
+        case __NR_clone: case __NR_fork: case __NR_vfork: case __NR_shmdt:
+        case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
+        case __NR_ioperm: case __NR_futex: case __NR_setsid:
+                // we don't know how to support these yet
                 BUG();
-                return 0;
+                return 1;
+
         }
+
+        return 0;
 }
 
 static void check_reg(char *reg, unsigned long a, unsigned long b) {
