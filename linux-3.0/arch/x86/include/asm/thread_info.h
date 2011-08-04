@@ -117,7 +117,7 @@ struct thread_info {
 #define _TIF_RECORD_REPLAY      (1 << TIF_RECORD_REPLAY)
 #endif
 #ifdef CONFIG_MRR
-#define _TIF_MRR_CHUNKING       (1 << TIF_MRR_CHUNKING) 
+#define _TIF_MRR_CHUNKING       (1 << TIF_MRR_CHUNKING)
 #endif
 #define _TIF_NOTSC		(1 << TIF_NOTSC)
 #define _TIF_IA32		(1 << TIF_IA32)
