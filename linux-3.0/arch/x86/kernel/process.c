@@ -43,6 +43,11 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 			return ret;
 		fpu_copy(&dst->thread.fpu, &src->thread.fpu);
 	}
+
+#ifdef CONFIG_RECORD_REPLAY
+        dst->rtcb = NULL;
+#endif
+
 	return 0;
 }
 

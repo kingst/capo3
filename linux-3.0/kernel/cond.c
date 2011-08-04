@@ -42,48 +42,56 @@
 **========================================================== 
 */
 
-#include <iostream>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/proc_fs.h>
+#include <linux/string.h>
+#include <linux/device.h>
+#include <linux/sched.h>
+#include <linux/prctl.h>
+#include <asm/io.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
+#include <linux/spinlock.h>
+#include <linux/uaccess.h>
+#include <linux/ptrace.h>
+#include <linux/kfifo.h>
+#include <linux/file.h>
+#include <linux/mman.h>
+#include <linux/syscalls.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <assert.h>
+#include <linux/cond.h>
 
-#include "util.h"
+void cond_init(cond_t *cond) {
+        init_waitqueue_head(&cond->wait);
+        cond->thread_count = 0;
+        cond->wait_num = 0;
+}
 
-using namespace std;
+void cond_wait(cond_t *cond, struct mutex *mutex) {
+        int ret;
+        uint64_t id;
 
-int main(void) {
-    replay_header_t header;
-    int ret;
-    struct execve_data *e;
+        mutex_unlock(mutex);        
 
-    while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
-        assert(ret == sizeof(header));
+        spin_lock(&cond->wait.lock);
+        cond->thread_count++;
+        id = cond->thread_count;
+        ret = wait_event_interruptible_locked(cond->wait, id <= cond->wait_num);
+        spin_unlock(&cond->wait.lock);
 
-        if(header.type == syscall_enter_event) {
-                cout << "syscall_enter_event, syscall = " << header.regs.orig_rax << " arg1 = " << (void *) header.regs.rdi << endl;
-        } else if(header.type == syscall_exit_event) {
-            cout << "syscall_exit_event, ret = " << header.regs.rax << endl;
-        } else if(header.type == thread_create_event) {
-            cout << "thread_create_event" << endl;
-        } else if(header.type == thread_exit_event) {
-            cout << "thread_exit_event" << endl;
-        } else if(header.type == instruction_event) {
-            cout << "instruction_event" << endl;
-        } else if(header.type == execve_event) {
-            cout << "execve_event" << endl;            
-            e = readExecveData();
-        } else if(header.type == copy_to_user_event) {
-            cout << "copy to user" << endl;
-            readBuffer();
-        } else {
-            assert(false);
-        }
-
-    }
-
-    assert(ret == 0);
-    
-    return 0;
+        mutex_lock(mutex);
+}
+void cond_signal(cond_t *cond) {
+        spin_lock(&cond->wait.lock);
+        cond->wait_num++;
+        wake_up_locked(&cond->wait);
+        spin_unlock(&cond->wait.lock);
+}
+void cond_broadcast(cond_t *cond) {
+        spin_lock(&cond->wait.lock);
+        cond->wait_num = cond->thread_count;
+        wake_up_locked(&cond->wait);
+        spin_unlock(&cond->wait.lock);
 }

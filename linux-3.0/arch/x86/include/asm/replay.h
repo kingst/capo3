@@ -20,6 +20,7 @@ typedef struct replay_header {
 #ifdef __KERNEL__
 
 #include <linux/kfifo.h>
+#include <linux/cond.h>
 
 typedef enum {idle, recording, replaying, done} replay_state_t;
 
@@ -30,11 +31,12 @@ typedef struct replay_sphere {
         // so they need to be protected from each other
         atomic_t state;
         struct kfifo fifo;
-        wait_queue_head_t usermode_wait;
-        wait_queue_head_t rr_thread_wait;
+        cond_t queue_full_cond;
+        cond_t queue_empty_cond;
+        cond_t next_record_cond;
 
         // these variables are only accessed by usermode
-        struct mutex usermode_mutex;
+        struct mutex mutex;
         atomic_t fd_count;
 
         // these variables are only accessed by rr threads

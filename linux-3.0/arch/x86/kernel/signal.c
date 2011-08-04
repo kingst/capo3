@@ -765,6 +765,8 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         int async = 0;
 
+        printk(KERN_CRIT "deliver signal rr\n");
+
         switch(async) {
         case SIGALRM: case SIGUSR1: case SIGCHLD: case SIGHUP: case SIGINT: 
         case SIGPIPE: case SIGUSR2: case SIGKILL: case SIGVTALRM:
@@ -818,7 +820,6 @@ static void do_signal(struct pt_regs *regs)
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 
 #ifdef CONFIG_RECORD_REPLAY
-        printk(KERN_CRIT "Delivering a signal!\n");
         if(test_thread_flag(TIF_RECORD_REPLAY))
                 signr = rr_deliver_signal(signr, regs);
 #endif

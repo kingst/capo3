@@ -304,11 +304,16 @@ static void print_stack(struct pt_regs *regs) {
 
 void rr_syscall_exit(struct pt_regs *regs) {
         rtcb_t *rtcb;
+        int signr;
         sanity_check();
 
         rtcb = current->rtcb;
 
         if(sphere_is_recording(rtcb->sphere)) {
+                if(rtcb->def_sig) {
+                        signr = get_signr(rtcb);
+                        send_sig(signr, current, 1);
+                }
                 record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         } else {
                 replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
@@ -336,6 +341,7 @@ void rr_send_signal(int signo) {
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb_t *rtcb;
         struct pt_regs *regs = task_pt_regs(tsk);
+        
         if(tsk->rtcb != NULL)
                 BUG();
 

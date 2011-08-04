@@ -77,6 +77,10 @@
 
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 /*
  * Protected counters by write_lock_irq(&tasklist_lock)
  */
@@ -278,6 +282,11 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	err = prop_local_init_single(&tsk->dirties);
 	if (err)
 		goto out;
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_ti_thread_flag(task_thread_info(orig), TIF_RECORD_REPLAY))
+                rr_thread_create(tsk, orig->rtcb->sphere);
+#endif
 
 	setup_thread_stack(tsk, orig);
 	clear_user_return_notifier(tsk);
