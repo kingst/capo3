@@ -1121,6 +1121,9 @@ zeroentry spurious_interrupt_bug do_spurious_interrupt_bug
 zeroentry coprocessor_error do_coprocessor_error
 errorentry alignment_check do_alignment_check
 zeroentry simd_coprocessor_error do_simd_coprocessor_error
+#ifdef CONFIG_MRR
+zeroentry mrr_full do_mrr_full
+#endif
 
 	/* Reload gs selector with exception handling */
 	/* edi:  new selector */

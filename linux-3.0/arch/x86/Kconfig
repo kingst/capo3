@@ -333,6 +333,20 @@ config RECORD_REPLAY
        ---help---
          Support for deterministic recording and replay.
 
+config MRR
+       bool "Support for memory interleaving recording"
+       depends on RECORD_REPLAY
+       default n
+       ---help---
+         Support for memory interleaving recording.
+
+config SIMICS
+       bool "Support for Simics magic calls"
+       depends on MRR
+       default n
+       ---help---
+         Support for Simics magic calls.
+
 config X86_EXTENDED_PLATFORM
 	bool "Support for extended (non-PC) x86 platforms"
 	default y

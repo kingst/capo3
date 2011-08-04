@@ -46,6 +46,14 @@
  */
 #define IRQ_MOVE_CLEANUP_VECTOR		FIRST_EXTERNAL_VECTOR
 
+/* 
+ * vector for mrr_full exception
+ * at the moment, it is vector 0x7f
+ */
+#ifdef CONFIG_MRR
+#include <asm/mrr/mrrhw_if.h>
+#endif
+
 #define IA32_SYSCALL_VECTOR		0x80
 #ifdef CONFIG_X86_32
 # define SYSCALL_VECTOR			0x80
