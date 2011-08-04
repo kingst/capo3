@@ -63,6 +63,10 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#ifdef CONFIG_MRR
+#include <asm/mrr/mrrhw_if.h>
+#include "mrr_if.h"
+#endif
 
 #define NUM_REPLAY_MINOR 4
 
@@ -350,6 +354,10 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
                 disable_TSC();
         set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
 
+#ifdef CONFIG_MRR
+        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
+#endif
+
         rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
         memset(rtcb, 0, sizeof(rtcb_t));
 
@@ -373,7 +381,18 @@ void rr_thread_exit(struct pt_regs *regs) {
 }
 
 void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
-        
+
+#ifdef CONFIG_MRR
+    // flush the mrr buffer, if necessary
+    if (test_ti_thread_flag(task_thread_info(prev_p), TIF_MRR_CHUNKING)) {
+        mrr_full_handler(prev_p, true);
+    }
+    // set the mrr flag in the flags register, if necessary
+    if (test_ti_thread_flag(task_thread_info(next_p), TIF_MRR_CHUNKING)) {
+        task_pt_regs(next_p)->flags |= MRR_FLAG_MASK;
+    }
+#endif
+
 }
 
 int rr_general_protection(struct pt_regs *regs) {

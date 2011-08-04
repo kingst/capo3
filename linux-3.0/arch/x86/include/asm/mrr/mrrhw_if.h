@@ -2,6 +2,19 @@
 #define __MRRHW_IF_H__
 
 ////////////////////////////////////////////////////////////////////////////////
+// Markers used for magic calls
+////////////////////////////////////////////////////////////////////////////////
+
+#define MRR_MARKERS_BEGIN 			0xB5000000
+
+#define MRR_MARKER_BREAK_SIM 		(MRR_MARKERS_BEGIN + 0x1)
+#define	MRR_MARKER_MESSAGE 			(MRR_MARKERS_BEGIN + 0x2)
+#define MRR_MARKER_MESSAGE_INT		(MRR_MARKERS_BEGIN + 0x3)
+
+#define MRR_SYS_MARKERS_BEGIN 		(MRR_MARKERS_BEGIN + 0x800000)
+#define MRR_MARKERS_END 			(MRR_MARKERS_BEGIN + 0xFFFFFF)
+
+////////////////////////////////////////////////////////////////////////////////
 // instructions
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -15,8 +28,8 @@
 // Misc contants
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MRR_VECTOR					0x7f
-#define MRR_FLAG_MASK				0x200000	// bit 21 = ID bit of the eflags register
+#define MRR_VECTOR                  0x7f
+#define MRR_FLAG_MASK               0x200000	// bit 21 = ID bit of the eflags register
 
 #endif // __MRRHW_IF_H__
 

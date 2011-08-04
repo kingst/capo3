@@ -28,14 +28,10 @@ EXPORT_SYMBOL(set_mrr_full_handler_cb);
  */
 dotraplinkage void do_mrr_full(void) {
 
-    if (NULL == current->rtcb) {
-        printk(KERN_ERR MSG_PREFIX "exception invoked on invalid RTCB.");
-        BUG();
-    }
-
     // flush the buffer
     if (mrr_full_handler_cb != NULL) {
         mrr_full_handler_cb(current, false);
     }
 }
+
 

@@ -52,6 +52,10 @@ typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
         uint32_t thread_id;
         uint64_t def_sig;
+#ifdef CONFIG_MRR
+        // TODO: change this later
+        char chunk_size_buffer[1024];
+#endif
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
