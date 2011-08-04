@@ -766,12 +766,34 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         int async = 0;
 
         printk(KERN_CRIT "deliver signal rr\n");
-
-        switch(async) {
-        case SIGALRM: case SIGUSR1: case SIGCHLD: case SIGHUP: case SIGINT: 
-        case SIGPIPE: case SIGUSR2: case SIGKILL: case SIGVTALRM:
-                async = 1;
-                break;
+        switch(signr) {
+                case SIGTERM: 
+                case SIGHUP: 
+                case SIGINT: 
+                case SIGQUIT: 
+                case SIGKILL: 
+                case SIGUSR1: 
+                case SIGUSR2: 
+                case SIGALRM: 
+                case SIGVTALRM:
+                case SIGPROF:
+                case SIGCHLD:
+                case SIGCONT:
+                case SIGSTOP:
+                case SIGTSTP:
+                case SIGTTIN:
+                case SIGTTOU:
+                case SIGIO: // also SIGPOLL -> 29
+                case SIGURG:
+                case SIGPIPE:
+                case SIGSTKFLT:
+                case SIGPWR:
+                case SIGSYS:
+                case SIGXCPU: 
+                case SIGXFSZ:
+                case SIGWINCH:
+                        async = 1;
+                        break;
         }
 
         // check if this is an async signal
@@ -781,7 +803,7 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         // check if we are at a system call boundary.  if not, defer the signal
         // until later when we are at a syscall boundary.
         if(syscall_get_nr(current, regs) < 0) {
-                BUG_ON(signr >= 64);
+                BUG_ON(signr >= SIGRTMAX);
                 current->rtcb->def_sig |= (1<<signr);
                 return -1;
         }
