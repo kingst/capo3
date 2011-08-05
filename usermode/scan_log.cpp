@@ -54,36 +54,39 @@
 using namespace std;
 
 int main(void) {
-    replay_header_t header;
-    int ret;
-    struct execve_data *e;
-
-    while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
-        assert(ret == sizeof(header));
-
-        if(header.type == syscall_enter_event) {
-                cout << "syscall_enter_event, syscall = " << header.regs.orig_rax << " arg1 = " << (void *) header.regs.rdi << endl;
-        } else if(header.type == syscall_exit_event) {
-            cout << "syscall_exit_event, ret = " << header.regs.rax << endl;
-        } else if(header.type == thread_create_event) {
-            cout << "thread_create_event" << endl;
-        } else if(header.type == thread_exit_event) {
-            cout << "thread_exit_event" << endl;
-        } else if(header.type == instruction_event) {
-            cout << "instruction_event" << endl;
-        } else if(header.type == execve_event) {
-            cout << "execve_event" << endl;            
-            e = readExecveData();
-        } else if(header.type == copy_to_user_event) {
-            cout << "copy to user" << endl;
-            readBuffer();
-        } else {
-            assert(false);
+        replay_header_t header;
+        int ret;
+        struct execve_data *e;
+        
+        while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
+                assert(ret == sizeof(header));
+                cout << header.thread_id << " ";
+                if(header.type == syscall_enter_event) {
+                        cout << "syscall_enter_event, syscall = " << header.regs.orig_rax << " arg1 = " 
+                             << (void *) header.regs.rdi << endl;
+                } else if(header.type == syscall_exit_event) {
+                        cout << "syscall_exit_event,  syscall = " << header.regs.orig_rax << " ret = " << header.regs.rax << endl;
+                } else if(header.type == thread_create_event) {
+                        cout << "thread_create_event" << endl;
+                } else if(header.type == thread_exit_event) {
+                        cout << "thread_exit_event" << endl;
+                } else if(header.type == instruction_event) {
+                        cout << "instruction_event" << endl;
+                } else if(header.type == execve_event) {
+                        cout << "execve_event" << endl;            
+                        e = readExecveData();
+                } else if(header.type == copy_to_user_event) {
+                        cout << "copy to user" << endl;
+                        readBuffer();
+                } else if(header.type == signal_event) {
+                        cout << "signal" << endl;
+                } else {
+                        assert(false);
+                }
+                
         }
-
-    }
-
-    assert(ret == 0);
-    
-    return 0;
+        
+        assert(ret == 0);
+        
+        return 0;
 }

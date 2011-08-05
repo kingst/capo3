@@ -761,57 +761,6 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	test_thread_flag(TIF_IA32) ? __NR_ia32_restart_syscall : __NR_restart_syscall
 #endif /* CONFIG_X86_32 */
 
-#ifdef CONFIG_RECORD_REPLAY
-static int rr_deliver_signal(int signr, struct pt_regs *regs) {
-        int async = 0;
-
-        printk(KERN_CRIT "deliver signal rr\n");
-        switch(signr) {
-                case SIGTERM: 
-                case SIGHUP: 
-                case SIGINT: 
-                case SIGQUIT: 
-                case SIGKILL: 
-                case SIGUSR1: 
-                case SIGUSR2: 
-                case SIGALRM: 
-                case SIGVTALRM:
-                case SIGPROF:
-                case SIGCHLD:
-                case SIGCONT:
-                case SIGSTOP:
-                case SIGTSTP:
-                case SIGTTIN:
-                case SIGTTOU:
-                case SIGIO: // also SIGPOLL -> 29
-                case SIGURG:
-                case SIGPIPE:
-                case SIGSTKFLT:
-                case SIGPWR:
-                case SIGSYS:
-                case SIGXCPU: 
-                case SIGXFSZ:
-                case SIGWINCH:
-                        async = 1;
-                        break;
-        }
-
-        // check if this is an async signal
-        if(!async)
-                return signr;
-
-        // check if we are at a system call boundary.  if not, defer the signal
-        // until later when we are at a syscall boundary.
-        if(syscall_get_nr(current, regs) < 0) {
-                BUG_ON(signr >= SIGRTMAX);
-                current->rtcb->def_sig |= (1<<signr);
-                return -1;
-        }
-
-        return signr;
-}
-#endif
-
 /*
  * Note that 'init' is a special process: it doesn't get signals it doesn't
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
@@ -842,7 +791,7 @@ static void do_signal(struct pt_regs *regs)
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY))
+        if((signr > 0) && test_thread_flag(TIF_RECORD_REPLAY))
                 signr = rr_deliver_signal(signr, regs);
 #endif
 
@@ -856,11 +805,6 @@ static void do_signal(struct pt_regs *regs)
 			 * clear the TS_RESTORE_SIGMASK flag.
 			 */
 			current_thread_info()->status &= ~TS_RESTORE_SIGMASK;
-
-#ifdef CONFIG_RECORD_REPLAY
-                        if(test_thread_flag(TIF_RECORD_REPLAY))
-                                rr_send_signal(signr);
-#endif
 
 		}
 		return;

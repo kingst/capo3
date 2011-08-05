@@ -363,11 +363,12 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_sigaltstack:
                 return 1;
 
-        case __NR_shmget: case __NR_shmat: case __NR_shmctl: case __NR_shutdown:
+        case __NR_shmget: case __NR_shmat: case __NR_shmctl:
         case __NR_vfork: case __NR_shmdt:
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
         case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
+                printk(KERN_CRIT "unhandled syscall %lu\n", regs->orig_ax);
                 BUG();
                 return 1;
 
@@ -470,6 +471,7 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
         }
 }
 
+
 // All of the replay helpers execute with the rr_thread_wait.lock held.  The wait
 // queue will release the lock when a thread waits, but ensures that it is held when
 // it resumes
@@ -477,7 +479,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                                 struct pt_regs *regs) {
         
         replay_header_t *header;
-        int is_ctu = 0;
+        int exit_loop = 0;
 
         /*
         printk(KERN_CRIT "thread_id = %u\n", thread_id);
@@ -493,17 +495,26 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 if(header == NULL)
                         BUG();
 
+                //printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
                 // on emulated system calls we will get a number of copy to user
                 // log entries between the system call enter and exit events
                 // so we loop here on copy to user events until we finally
                 // get to the system call exit event
                 if(header->type == copy_to_user_event) {
-                        is_ctu = 1;
-                        replay_copy_to_user(sphere, regs->orig_ax == __NR_getpid);
+                        exit_loop = 0;
+                        replay_copy_to_user(sphere, (regs->orig_ax == __NR_getpid) && (event == syscall_exit_event));
+                } else if(header->type == signal_event) {
+                        exit_loop = 0;
+                        printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
+                        current->rtcb->send_sig |= 1<<header->regs.orig_ax;
+                        send_sig(header->regs.orig_ax, current, 1);
                 } else {
-                        is_ctu = 0;
-                        if(header->type != event)
+                        exit_loop = 1;
+                        if(header->type != event) {
+                                printk(KERN_CRIT "header->type = %u, type = %u, header->orig_ax %lu, regs->orig_ax = %lu\n", 
+                                       header->type, event, header->regs.orig_ax, regs->orig_ax);
                                 BUG();
+                        }
                 }
 
                 replay_handle_event(sphere, event, regs, header);
@@ -513,9 +524,9 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
                 cond_broadcast(&sphere->next_record_cond);
 
-        } while(is_ctu);
+        } while(!exit_loop);
 
-        //printk(KERN_CRIT "done with event\n");
+        //printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
 }
 
 /**********************************************************************************************/

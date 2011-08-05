@@ -283,12 +283,14 @@ void rr_syscall_enter(struct pt_regs *regs) {
 
         rtcb = current->rtcb;
 
+        // we clear send_sig here because we use it to prevent recording spurious
+        // syscall_exit events that happen when we send signals on the syscall
+        // return path
+        if(rtcb->send_sig)
+                rtcb->send_sig = 0;
+
         if(sphere_is_recording(rtcb->sphere)) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
-                if(rtcb->def_sig) {
-                        signr = get_signr(rtcb);
-                        send_sig(signr, current, 1);
-                }
         } else {
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
@@ -307,20 +309,56 @@ static void print_stack(struct pt_regs *regs) {
 */
 
 void rr_syscall_exit(struct pt_regs *regs) {
-        rtcb_t *rtcb;
+        uint64_t mask = 1;
         int signr;
+        rtcb_t *rtcb;
+
         sanity_check(current);
 
         rtcb = current->rtcb;
 
+        // This will skip syscall_exit calls in two situations.  First, when the
+        // kernel restarts a system call (as a result of a signal).  Second, on 
+        // an sigreturn system call.  Because we re-execute the sigreturn
+        // system call then it should be ok to do this.
+        if(((long) regs->orig_ax) < 0)
+                return;
+
+        // the logic here deals with signal delivery and the interactions with
+        // the syscall_exit callback mechanism.  The way it works is that the
+        // kernel will call this callback after a system call and then after it
+        // returns the kernel checks for pending signals.  If there are any it
+        // will deal with them and call the syscall exit handler again.  Our
+        // goal is to log the signal event before the syscall exit event, and
+        // to log only one syscall exit event.
+        //
+        // To deal with this we (1) don't log syscall exits when there is a
+        // pending signal because we know that this callback will be called
+        // again.  If the def_sig var is set, the do_signal function set it
+        // before squashing the signal, so we log the syscall exit and signal
+        // here, then we set send_sig.  Send_sig tells do_signal to actually
+        // deliver the signal, and it is not cleared until the next syscall
+        // enter to prevent duplicate logging of syscall exits.
+        //
+        // the only thing I am unsure about is if there is a race condition
+        // where you can recieve a pending signal after logging the system call
+        // exit but before checking for any pending signals.
         if(sphere_is_recording(rtcb->sphere)) {
                 if(rtcb->def_sig) {
                         signr = get_signr(rtcb);
+                        mask <<= signr;
+                        rtcb->def_sig &= ~mask;
+                        BUG_ON(rtcb->send_sig != 0);
+                        rtcb->send_sig |= mask;
+                        rr_send_signal(signr);
                         send_sig(signr, current, 1);
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 }
-                record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         } else {
-                replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                if(rtcb->send_sig == 0)
+                        replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         }
 }
 
@@ -332,6 +370,7 @@ void rr_send_signal(int signo) {
         regs = task_pt_regs(current);
 
         if(sphere_is_recording(current->rtcb->sphere)) {
+                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs->orig_ax);
                 orig_ax = regs->orig_ax;
                 regs->orig_ax = signo;
                 record_header(current->rtcb->sphere, signal_event, 
@@ -340,6 +379,63 @@ void rr_send_signal(int signo) {
         } else {
                 BUG();
         }
+}
+
+int rr_deliver_signal(int signr, struct pt_regs *regs) {
+        int async = 0;
+        uint64_t mask;
+
+        if(signr < 0)
+                return signr;
+
+        switch(signr) {
+                case SIGTERM: 
+                case SIGHUP: 
+                case SIGINT: 
+                case SIGQUIT: 
+                case SIGKILL: 
+                case SIGUSR1: 
+                case SIGUSR2: 
+                case SIGALRM: 
+                case SIGVTALRM:
+                case SIGPROF:
+                case SIGCHLD:
+                case SIGCONT:
+                case SIGSTOP:
+                case SIGTSTP:
+                case SIGTTIN:
+                case SIGTTOU:
+                case SIGIO: // also SIGPOLL -> 29
+                case SIGURG:
+                case SIGPIPE:
+                case SIGSTKFLT:
+                case SIGPWR:
+                case SIGSYS:
+                case SIGXCPU: 
+                case SIGXFSZ:
+                case SIGWINCH:
+                        async = 1;
+                        break;
+        }
+
+        // check if this is an async signal
+        if(!async)
+                return signr;
+
+        BUG_ON(signr >= SIGRTMAX);        
+        mask = 1;
+        mask <<= signr;
+        if((current->rtcb->send_sig & mask) != 0) {
+                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
+                return signr;
+        } else {
+                if(sphere_is_recording(current->rtcb->sphere))
+                        current->rtcb->def_sig |= mask;
+                printk(KERN_CRIT "defer signal\n");
+                return -1;
+        }
+
+        return signr;
 }
 
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
@@ -359,6 +455,8 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
 
         rtcb->sphere = sphere;
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
+        rtcb->def_sig = 0;
+        rtcb->send_sig = 0;
         tsk->rtcb = rtcb;
 
 #ifdef CONFIG_MRR
