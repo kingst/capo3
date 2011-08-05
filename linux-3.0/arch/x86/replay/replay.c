@@ -310,6 +310,13 @@ void rr_syscall_exit(struct pt_regs *regs) {
 
         rtcb = current->rtcb;
 
+        // This will skip syscall_exit calls in two situations.  First, when the
+        // kernel restarts a system call (as a result of a signal).  Second, on 
+        // an sigreturn system call.  Because we re-execute the sigreturn
+        // system call then it should be ok to do this.
+        if(((long) regs->orig_ax) < 0)
+                return;
+
         if(sphere_is_recording(rtcb->sphere)) {
                 if(rtcb->def_sig) {
                         signr = get_signr(rtcb);
@@ -324,7 +331,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 }
         } else {
-                if((rtcb->send_sig == 0) && (regs->orig_ax >= 0))
+                if(rtcb->send_sig == 0)
                         replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         }
 }
