@@ -407,8 +407,10 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
         if(regs->orig_ax == __NR_open) {
                 // we let an open through, fixup the fd
                 if(regs->ax != header->regs.ax) {
-                        BUG_ON((regs->ax < 0) && (header->regs.ax >= 0));
-                        if((regs->ax >= 0) && (header->regs.ax < 0)) {
+                        if((regs->ax < 0) && (header->regs.ax >= 0)) {
+                                // worked during recording, but not during replay, switch to
+                                // replaying this syscall and hope it is not for an mmap
+                        } else if((regs->ax >= 0) && (header->regs.ax < 0)) {
                                 // failed during recording, but not now, clean up
                                 sys_close(regs->ax);
                         } else if(regs->ax != header->regs.ax) {
