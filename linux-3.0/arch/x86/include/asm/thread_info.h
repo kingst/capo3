@@ -87,6 +87,8 @@ struct thread_info {
 #ifdef CONFIG_RECORD_REPLAY
 #define TIF_RECORD_REPLAY       12
 #endif
+
+
 #define TIF_NOTSC		16	/* TSC is not accessible in userland */
 #define TIF_IA32		17	/* 32bit process */
 #define TIF_FORK		18	/* ret_from_fork */

@@ -274,17 +274,16 @@ static int get_signr(rtcb_t *rtcb) {
 
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
-        int signr;
+
         sanity_check();
 
         rtcb = current->rtcb;
 
+        if(rtcb->send_sig)
+                rtcb->send_sig = 0;
+
         if(sphere_is_recording(rtcb->sphere)) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
-                if(rtcb->def_sig) {
-                        signr = get_signr(rtcb);
-                        send_sig(signr, current, 1);
-                }
         } else {
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
@@ -303,8 +302,10 @@ static void print_stack(struct pt_regs *regs) {
 */
 
 void rr_syscall_exit(struct pt_regs *regs) {
-        rtcb_t *rtcb;
+        uint64_t mask = 1;
         int signr;
+        rtcb_t *rtcb;
+
         sanity_check();
 
         rtcb = current->rtcb;
@@ -312,11 +313,19 @@ void rr_syscall_exit(struct pt_regs *regs) {
         if(sphere_is_recording(rtcb->sphere)) {
                 if(rtcb->def_sig) {
                         signr = get_signr(rtcb);
+                        mask <<= signr;
+                        rtcb->def_sig &= ~mask;
+                        BUG_ON(rtcb->send_sig != 0);
+                        rtcb->send_sig |= mask;
+                        rr_send_signal(signr);
                         send_sig(signr, current, 1);
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 }
-                record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         } else {
-                replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                if((rtcb->send_sig == 0) && (regs->orig_ax >= 0))
+                        replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
         }
 }
 
@@ -328,6 +337,7 @@ void rr_send_signal(int signo) {
         regs = task_pt_regs(current);
 
         if(sphere_is_recording(current->rtcb->sphere)) {
+                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs->orig_ax);
                 orig_ax = regs->orig_ax;
                 regs->orig_ax = signo;
                 record_header(current->rtcb->sphere, signal_event, 
@@ -355,6 +365,8 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
 
         rtcb->sphere = sphere;
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
+        rtcb->def_sig = 0;
+        rtcb->send_sig = 0;
         tsk->rtcb = rtcb;
 }
 
