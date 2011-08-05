@@ -250,14 +250,14 @@ MODULE_VERSION(REPLAY_VERSION);
 
 
 /*********************************** Callbacks from kernel ************************************/
-static void sanity_check(void) {
-        if(current->rtcb == NULL)
+static void sanity_check(struct task_struct *tsk) {
+        if(tsk->rtcb == NULL)
                 BUG();
 
-        if(current->rtcb->sphere == NULL)
+        if(tsk->rtcb->sphere == NULL)
                 BUG();
 
-        if(!sphere_is_recording_replaying(current->rtcb->sphere))
+        if(!sphere_is_recording_replaying(tsk->rtcb->sphere))
                 BUG();
 }
 
@@ -279,7 +279,7 @@ static int get_signr(rtcb_t *rtcb) {
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
         int signr;
-        sanity_check();
+        sanity_check(current);
 
         rtcb = current->rtcb;
 
@@ -309,7 +309,7 @@ static void print_stack(struct pt_regs *regs) {
 void rr_syscall_exit(struct pt_regs *regs) {
         rtcb_t *rtcb;
         int signr;
-        sanity_check();
+        sanity_check(current);
 
         rtcb = current->rtcb;
 
@@ -327,7 +327,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
 void rr_send_signal(int signo) {
         unsigned long orig_ax;
         struct pt_regs *regs;
-        sanity_check();
+        sanity_check(current);
 
         regs = task_pt_regs(current);
 
@@ -354,22 +354,22 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
                 disable_TSC();
         set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
 
-#ifdef CONFIG_MRR
-        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
-#endif
-
         rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
         memset(rtcb, 0, sizeof(rtcb_t));
 
         rtcb->sphere = sphere;
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
         tsk->rtcb = rtcb;
+
+#ifdef CONFIG_MRR
+        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
+#endif
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
 
-        sanity_check();
+        sanity_check(current);
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -385,11 +385,17 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
 #ifdef CONFIG_MRR
     // flush the mrr buffer, if necessary
     if (test_ti_thread_flag(task_thread_info(prev_p), TIF_MRR_CHUNKING)) {
-        mrr_full_handler(prev_p, true);
+        sanity_check(prev_p);
+        if (sphere_is_recording(prev_p->rtcb->sphere)) {
+            mrr_full_handler(prev_p, true);
+        }
     }
     // set the mrr flag in the flags register, if necessary
     if (test_ti_thread_flag(task_thread_info(next_p), TIF_MRR_CHUNKING)) {
-        task_pt_regs(next_p)->flags |= MRR_FLAG_MASK;
+        sanity_check(next_p);
+        if (sphere_is_recording(next_p->rtcb->sphere)) {
+            task_pt_regs(next_p)->flags |= MRR_FLAG_MASK;
+        }
     }
 #endif
 
@@ -400,7 +406,7 @@ int rr_general_protection(struct pt_regs *regs) {
         uint16_t opcode;
         long low, high;
 
-        sanity_check();
+        sanity_check(current);
 
         if(copy_from_user(&opcode, (void *) regs->ip, sizeof(opcode)))
                 return 0;
@@ -424,7 +430,7 @@ int rr_general_protection(struct pt_regs *regs) {
 }
 
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
-        sanity_check();
+        sanity_check(current);
 
         // check for kernel addresses and return if we get one
         if(to_addr > PAGE_OFFSET)
