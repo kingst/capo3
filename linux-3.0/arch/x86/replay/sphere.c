@@ -261,12 +261,6 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         return 0;
 }
 
-
-// for this function we are going to use the rr_thread_wait lock
-// and it will protect the sphere->header and the out end of the fifo. 
-// No other code should touch the sphere->header unless it holds this lock also
-//
-// Also, the caller needs to kfree the memory returned from this function
 static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t thread_id) {
         replay_header_t *header;
 
@@ -291,11 +285,6 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
         int ret, bytesWritten, len;
         unsigned char c;
 
-        sphere->fifo_head_ctu_buf = 1;
-
-        // reuse the same wait queue, but this time we have a different condition
-        // by setting fifo_head_ctu_buf = 1 we are ensuring that this thread
-        // will be the only one that wakes up
         while(!kfifo_has_ctu_header(sphere))
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
         
@@ -473,10 +462,6 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
         }
 }
 
-
-// All of the replay helpers execute with the rr_thread_wait.lock held.  The wait
-// queue will release the lock when a thread waits, but ensures that it is held when
-// it resumes
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs) {
         
