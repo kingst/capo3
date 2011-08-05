@@ -490,9 +490,14 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 if(header->type == copy_to_user_event) {
                         exit_loop = 0;
                         // the event==syscall_exit_event condition is to squash copy to user
-                        // calls that happen on behalf of a signal (and happen after a syscall exit
+                        // calls that happen on behalf of a signal (and happen after a syscall exit                        
                         // instead of before like is the case with system calls)
-                        replay_copy_to_user(sphere, (regs->orig_ax == __NR_getpid) && (event == syscall_exit_event));
+                        //
+                        // also, we replay copy to user for clone system calls because we re-execute
+                        // them but the kernel pushes some pid information into userspace that will
+                        // be different whey replaying
+                        replay_copy_to_user(sphere, ((regs->orig_ax == __NR_getpid) || (regs->orig_ax == __NR_clone)) 
+                                                    && (event == syscall_exit_event));
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
                         printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
