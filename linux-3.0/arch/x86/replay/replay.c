@@ -279,6 +279,9 @@ void rr_syscall_enter(struct pt_regs *regs) {
 
         rtcb = current->rtcb;
 
+        // we clear send_sig here because we use it to prevent recording spurious
+        // syscall_exit events that happen when we send signals on the syscall
+        // return path
         if(rtcb->send_sig)
                 rtcb->send_sig = 0;
 
@@ -317,6 +320,23 @@ void rr_syscall_exit(struct pt_regs *regs) {
         if(((long) regs->orig_ax) < 0)
                 return;
 
+        // the logic here is all to deal with signal delivery and the interactions
+        // with the syscall_exit callback mechanism.  The way it works is that the
+        // kernel will call this callback after a system call and then after it returns
+        // the kernel checks for pending signals.  If there are any it will deal with them
+        // and call the syscall exit handler again.  Our goal is to log the signal event
+        // before the syscall exit event, and to log only one syscall exit event.
+        //
+        // To deal with this we (1) don't log syscall exits when there is a pending signal
+        // because we know that this callback will be called again.  If the def_sig var
+        // is set, the do_signal function set it before squashing the signal, so we
+        // log the syscall exit and signal here, then we set send_sig.  Send_sig tells
+        // do signal to actually send the signal, and it is not cleared until the next
+        // syscall enter to prevent duplicate logging of syscall exits.
+        //
+        // the only thing I am unsure about is if there is a race condition where you 
+        // can recieve a pending signal after logging the system call exit but before
+        // checking for any pending signals.
         if(sphere_is_recording(rtcb->sphere)) {
                 if(rtcb->def_sig) {
                         signr = get_signr(rtcb);
