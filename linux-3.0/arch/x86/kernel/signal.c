@@ -761,65 +761,6 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	test_thread_flag(TIF_IA32) ? __NR_ia32_restart_syscall : __NR_restart_syscall
 #endif /* CONFIG_X86_32 */
 
-#ifdef CONFIG_RECORD_REPLAY
-static int rr_deliver_signal(int signr, struct pt_regs *regs) {
-        int async = 0;
-        uint64_t mask;
-
-        if(signr < 0)
-                return signr;
-
-        switch(signr) {
-                case SIGTERM: 
-                case SIGHUP: 
-                case SIGINT: 
-                case SIGQUIT: 
-                case SIGKILL: 
-                case SIGUSR1: 
-                case SIGUSR2: 
-                case SIGALRM: 
-                case SIGVTALRM:
-                case SIGPROF:
-                case SIGCHLD:
-                case SIGCONT:
-                case SIGSTOP:
-                case SIGTSTP:
-                case SIGTTIN:
-                case SIGTTOU:
-                case SIGIO: // also SIGPOLL -> 29
-                case SIGURG:
-                case SIGPIPE:
-                case SIGSTKFLT:
-                case SIGPWR:
-                case SIGSYS:
-                case SIGXCPU: 
-                case SIGXFSZ:
-                case SIGWINCH:
-                        async = 1;
-                        break;
-        }
-
-        // check if this is an async signal
-        if(!async)
-                return signr;
-
-        BUG_ON(signr >= SIGRTMAX);        
-        mask = 1;
-        mask <<= signr;
-        if((current->rtcb->send_sig & mask) != 0) {
-                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
-                return signr;
-        } else {
-                if(sphere_is_recording(current->rtcb->sphere))
-                        current->rtcb->def_sig |= mask;
-                printk(KERN_CRIT "defer signal\n");
-                return -1;
-        }
-
-        return signr;
-}
-#endif
-
 /*
  * Note that 'init' is a special process: it doesn't get signals it doesn't
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
