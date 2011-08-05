@@ -363,11 +363,12 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_sigaltstack:
                 return 1;
 
-        case __NR_shmget: case __NR_shmat: case __NR_shmctl: case __NR_shutdown:
+        case __NR_shmget: case __NR_shmat: case __NR_shmctl:
         case __NR_vfork: case __NR_shmdt:
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
         case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
+                printk(KERN_CRIT "unhandled syscall %lu\n", regs->orig_ax);
                 BUG();
                 return 1;
 
