@@ -398,7 +398,9 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("r8", regs->r8, stored_regs->r8);
         check_reg("r9", regs->r9, stored_regs->r9);
         check_reg("r10", regs->r10, stored_regs->r10);
-        check_reg("r11", regs->r11, stored_regs->r11);
+        // r11 is used as eflags for sysret/syscall.
+        // it should not be checked here --Nima
+        // check_reg("r11", regs->r11, stored_regs->r11);
 }
 
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {

@@ -51,6 +51,10 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 asmlinkage extern void ret_from_fork(void);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
@@ -475,6 +479,12 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	percpu_write(kernel_stack,
 		  (unsigned long)task_stack_page(next_p) +
 		  THREAD_SIZE - KERNEL_STACK_OFFSET);
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
+           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
+                rr_switch_to(prev_p, next_p);
+#endif
 
 	/*
 	 * Now maybe reload the debug registers and handle I/O bitmaps

@@ -18,7 +18,7 @@ static inline int mrr_flush_buffer(void *paddr, int actor_id) {
     asm volatile (
         __MRR_INST_FLUSH_BUFFER
         : "=a" (ret)
-        : "a" (paddr), "b" (actor_id)
+        : "a" (paddr), "c" (actor_id)
     );
 
     return ret;
@@ -31,7 +31,7 @@ static inline int mrr_flush(void *paddr, int actor_id) {
     asm volatile (
         __MRR_INST_FLUSH_MRR
         : "=a" (ret)
-        : "a" (paddr), "b" (actor_id)
+        : "a" (paddr), "c" (actor_id)
     );
 
     return ret;

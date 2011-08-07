@@ -100,9 +100,6 @@ struct thread_info {
 #define TIF_BLOCKSTEP		25	/* set when we want DEBUGCTLMSR_BTF */
 #define TIF_LAZY_MMU_UPDATES	27	/* task is updating the mmu lazily */
 #define TIF_SYSCALL_TRACEPOINT	28	/* syscall tracepoint instrumentation */
-#ifdef CONFIG_MRR
-#define TIF_MRR_CHUNKING    29   /* MRR chunking active */
-#endif
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
@@ -128,9 +125,6 @@ struct thread_info {
 #define _TIF_BLOCKSTEP		(1 << TIF_BLOCKSTEP)
 #define _TIF_LAZY_MMU_UPDATES	(1 << TIF_LAZY_MMU_UPDATES)
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
-#ifdef CONFIG_MRR
-#define _TIF_MRR_CHUNKING       (1 << TIF_MRR_CHUNKING)
-#endif
 
 #ifdef CONFIG_RECORD_REPLAY
 /* work to do in syscall_trace_enter() */

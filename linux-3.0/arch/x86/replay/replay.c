@@ -278,7 +278,6 @@ static int get_signr(rtcb_t *rtcb) {
 
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
-        int signr;
         sanity_check(current);
 
         rtcb = current->rtcb;
@@ -458,10 +457,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         tsk->rtcb = rtcb;
-
-#ifdef CONFIG_MRR
-        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
-#endif
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
@@ -482,14 +477,14 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
 
 #ifdef CONFIG_MRR
     // flush the mrr buffer, if necessary
-    if (test_ti_thread_flag(task_thread_info(prev_p), TIF_MRR_CHUNKING)) {
+    if (test_ti_thread_flag(task_thread_info(prev_p), TIF_RECORD_REPLAY)) {
         sanity_check(prev_p);
         if (sphere_is_recording(prev_p->rtcb->sphere)) {
             mrr_full_handler(prev_p, true);
         }
     }
     // set the mrr flag in the flags register, if necessary
-    if (test_ti_thread_flag(task_thread_info(next_p), TIF_MRR_CHUNKING)) {
+    if (test_ti_thread_flag(task_thread_info(next_p), TIF_RECORD_REPLAY)) {
         sanity_check(next_p);
         if (sphere_is_recording(next_p->rtcb->sphere)) {
             task_pt_regs(next_p)->flags |= MRR_FLAG_MASK;
