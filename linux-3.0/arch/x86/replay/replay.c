@@ -331,7 +331,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
         // goal is to log the signal event before the syscall exit event, and
         // to log only one syscall exit event.
         //
-        // To deal with this we (1) don't log syscall exits when there is a
+        // To deal with this we don't log syscall exits when there is a
         // pending signal because we know that this callback will be called
         // again.  If the def_sig var is set, the do_signal function set it
         // before squashing the signal, so we log the syscall exit and signal
