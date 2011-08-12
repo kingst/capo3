@@ -474,19 +474,21 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         replay_header_t *header;
         int exit_loop = 0;
 
+        /*
         printk(KERN_CRIT "thread_id = %u\n", thread_id);
         if((event == syscall_enter_event) || (event == syscall_exit_event)) {
                 printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs->orig_ax);
         } else {
                 printk(KERN_CRIT "event %u\n", event);
         }
+        */
 
         do {
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
                         BUG();
 
-                printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
+                //printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
                 // on emulated system calls we will get a number of copy to user
                 // log entries between the system call enter and exit events
                 // so we loop here on copy to user events until we finally
@@ -525,7 +527,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
         } while(!exit_loop);
 
-        printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
+        //printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
 }
 
 /**********************************************************************************************/
