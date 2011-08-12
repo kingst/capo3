@@ -194,7 +194,15 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	/*
 	 * Generate 16 random bytes for userspace PRNG seeding.
 	 */
-	get_random_bytes(k_rand_bytes, sizeof(k_rand_bytes));
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_thread_flag(TIF_RECORD_REPLAY)) {
+                memset(k_rand_bytes, 0, sizeof(k_rand_bytes));
+        } else {
+                get_random_bytes(k_rand_bytes, sizeof(k_rand_bytes));
+        }
+#else
+        get_random_bytes(k_rand_bytes, sizeof(k_rand_bytes));
+#endif
 	u_rand_bytes = (elf_addr_t __user *)
 		       STACK_ALLOC(p, sizeof(k_rand_bytes));
 	if (__copy_to_user(u_rand_bytes, k_rand_bytes, sizeof(k_rand_bytes)))

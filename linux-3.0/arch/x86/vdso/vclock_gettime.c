@@ -116,6 +116,7 @@ notrace static noinline int do_monotonic_coarse(struct timespec *ts)
 
 notrace int __vdso_clock_gettime(clockid_t clock, struct timespec *ts)
 {
+#ifndef CONFIG_RECORD_REPLAY
 	if (likely(gtod->sysctl_enabled))
 		switch (clock) {
 		case CLOCK_REALTIME:
@@ -131,6 +132,7 @@ notrace int __vdso_clock_gettime(clockid_t clock, struct timespec *ts)
 		case CLOCK_MONOTONIC_COARSE:
 			return do_monotonic_coarse(ts);
 		}
+#endif
 	return vdso_fallback_gettime(clock, ts);
 }
 int clock_gettime(clockid_t, struct timespec *)
@@ -139,6 +141,7 @@ int clock_gettime(clockid_t, struct timespec *)
 notrace int __vdso_gettimeofday(struct timeval *tv, struct timezone *tz)
 {
 	long ret;
+#ifndef CONFIG_RECORD_REPLAY
 	if (likely(gtod->sysctl_enabled && gtod->clock.vread)) {
 		if (likely(tv != NULL)) {
 			BUILD_BUG_ON(offsetof(struct timeval, tv_usec) !=
@@ -154,6 +157,7 @@ notrace int __vdso_gettimeofday(struct timeval *tv, struct timezone *tz)
 		}
 		return 0;
 	}
+#endif
 	asm("syscall" : "=a" (ret) :
 	    "0" (__NR_gettimeofday), "D" (tv), "S" (tz) : "memory");
 	return ret;
@@ -175,6 +179,9 @@ static __always_inline long time_syscall(long *t)
 
 notrace time_t __vdso_time(time_t *t)
 {
+#ifdef CONFIG_RECORD_REPLAY
+        return time_syscall(t);
+#else
 	time_t result;
 
 	if (unlikely(!VVAR(vsyscall_gtod_data).sysctl_enabled))
@@ -186,6 +193,8 @@ notrace time_t __vdso_time(time_t *t)
 	if (t)
 		*t = result;
 	return result;
+#endif
 }
+
 int time(time_t *t)
 	__attribute__((weak, alias("__vdso_time")));

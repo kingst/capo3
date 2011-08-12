@@ -282,8 +282,8 @@ static int kfifo_has_ctu_header(replay_sphere_t *sphere) {
 static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
         uint64_t to_addr=0;
         uint32_t i, idx, ctu_len=0;
-        int ret, bytesWritten, len;
-        unsigned char c;
+        int ret, bytesWritten, len, cret;
+        unsigned char c, ref;        
 
         sphere->fifo_head_ctu_buf = 1;
 
@@ -317,8 +317,14 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                         // XXX FIXME we should put something here to check and make 
                         // sure the values are the same
                         for(i = 0; i < len; i++) {
+                                cret = copy_from_user(&ref, (void *) (to_addr+i), sizeof(ref));
                                 ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
                                 if(ret != sizeof(c)) BUG();
+                                if(c != ref) {
+                                        printk(KERN_CRIT "copy_to_user bug at addr %p %d %d %d %d",
+                                               (void *) (to_addr+i), i, c, ref, cret);
+                                        BUG();
+                                }
                         }
                 }
                 idx += bytesWritten;
@@ -334,7 +340,7 @@ static int reexecute_syscall(struct pt_regs *regs) {
         // system that is replaying and that opening an existing file with O_RDONLY will
         // not affect it
         if(regs->orig_ax == __NR_open)
-                return (regs->si == O_RDONLY);
+                return ((regs->si & O_ACCMODE) == O_RDONLY);
 
         // this is used to detect shared memory threads, something we
         // don't handle yet
@@ -395,7 +401,7 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
 }
 
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
-        BUG_ON(header->type != syscall_exit_event);
+        BUG_ON(header->type != syscall_exit_event);        
 
         if(regs->orig_ax == __NR_open) {
                 // we let an open through, fixup the fd
@@ -427,7 +433,7 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
                 // XXX FIXME
                 // we need to re-execute these if one of the
                 // fds is from our previous open
-       }
+        }
 }
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
@@ -494,9 +500,14 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 if(header->type == copy_to_user_event) {
                         exit_loop = 0;
                         // the event==syscall_exit_event condition is to squash copy to user
-                        // calls that happen on behalf of a signal (and happen after a syscall exit
+                        // calls that happen on behalf of a signal (and happen after a syscall exit                        
                         // instead of before like is the case with system calls)
-                        replay_copy_to_user(sphere, (regs->orig_ax == __NR_getpid) && (event == syscall_exit_event));
+                        //
+                        // also, we replay copy to user for clone system calls because we re-execute
+                        // them but the kernel pushes some pid information into userspace that will
+                        // be different whey replaying
+                        replay_copy_to_user(sphere, ((regs->orig_ax == __NR_getpid) || (regs->orig_ax == __NR_clone)) 
+                                                    && (event == syscall_exit_event));
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
                         printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
