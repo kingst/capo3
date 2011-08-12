@@ -285,6 +285,8 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
         int ret, bytesWritten, len;
         unsigned char c;
 
+        sphere->fifo_head_ctu_buf = 1;
+
         while(!kfifo_has_ctu_header(sphere))
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
         
@@ -498,7 +500,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
                         printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
-                        current->rtcb->send_sig |= 1<<header->regs.orig_ax;
+                        current->rtcb->send_sig |= 1 << header->regs.orig_ax;
                         send_sig(header->regs.orig_ax, current, 1);
                 } else {
                         exit_loop = 1;

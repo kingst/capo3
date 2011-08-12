@@ -24,9 +24,9 @@ void mrr_full_handler(struct task_struct *tsk, bool complete_flush) {
         void *buf_addr = &tsk->rtcb->chunk_size_buffer;
 
         if (complete_flush) {
-//            dump_size = mrr_flush(buf_addr, tsk->rtcb->thread_id);
+            dump_size = mrr_flush(buf_addr, tsk->rtcb->thread_id);
         } else {
-//            dump_size = mrr_flush_buffer(buf_addr, tsk->rtcb->thread_id);
+            dump_size = mrr_flush_buffer(buf_addr, tsk->rtcb->thread_id);
         }
 
         // TODO: complete this
