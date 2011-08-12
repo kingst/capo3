@@ -328,7 +328,7 @@ endif
 
 if X86_64
 config RECORD_REPLAY
-       bool "Support for deterministic recording and reply"
+       bool "Support for deterministic recording and replay"
        default n
        ---help---
          Support for deterministic recording and replay.
