@@ -76,13 +76,11 @@ int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count)
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
 
 // The first thread to record/replay calls these on itself
-// holds the rr_thread_wait.lock
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
 
 // called from record/replay threads when allocated
 // might be called from context of a different thread
-// holds the rr_thread_wait.lock
 void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs);
 uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs);
 
@@ -92,7 +90,6 @@ int sphere_is_recording(replay_sphere_t *sphere);
 int sphere_is_replaying(replay_sphere_t *sphere);
 
 // calls from threads that are being recorded/replayed
-// holds the rr_thread_wait.lock
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs);
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
