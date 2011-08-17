@@ -42,10 +42,10 @@
 **========================================================== 
 */
 
-#include <iostream>
-
 #include <stdio.h>
 #include <stdlib.h>
+
+#define __USE_GNU
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -56,78 +56,76 @@
 
 #include "util.h"
 
-using namespace std;
-
 void recordString(char *s) {
-    int ret;
-    int32_t len;
+        int ret;
+        int32_t len;
 
-    len = strlen(s);
-    ret = write(STDOUT_FILENO, &len, sizeof(len));
-    assert(ret == sizeof(len));
+        len = strlen(s);
+        ret = write(STDOUT_FILENO, &len, sizeof(len));
+        assert(ret == sizeof(len));
 
-    ret = write(STDOUT_FILENO, s, len);
-    assert(ret == len);
+        ret = write(STDOUT_FILENO, s, len);
+        assert(ret == len);
 }
 
 void recordStringArray(char *array[]) {
-    int32_t idx, count = 0;
+        int32_t idx, count = 0;
 
-    while(array[count] != NULL)
-        count++;
+        while(array[count] != NULL)
+                count++;
 
-    int ret = write(STDOUT_FILENO, &count, sizeof(count));
-    assert(ret == sizeof(count));
-    for(idx = 0; idx < count; idx++) {
-        recordString(array[idx]);
-    }
+        int ret = write(STDOUT_FILENO, &count, sizeof(count));
+        assert(ret == sizeof(count));
+        for(idx = 0; idx < count; idx++) {
+                recordString(array[idx]);
+        }
 
 }
 
 void recordExecve(char *fileName, char *argv[], char *envp[]) {
-    replay_header_t header;
+        replay_header_t header;
 
-    memset(&header, 0, sizeof(header));
+        memset(&header, 0, sizeof(header));
 
-    header.type = execve_event;
-    int ret = write(STDOUT_FILENO, &header, sizeof(header));
-    assert(ret == sizeof(header));
+        header.type = execve_event;
+        int ret = write(STDOUT_FILENO, &header, sizeof(header));
+        assert(ret == sizeof(header));
 
-    recordString(fileName);
-    recordStringArray(argv);
-    recordStringArray(envp);
+        recordString(fileName);
+        recordStringArray(argv);
+        recordStringArray(envp);
 }
 
 int main(int argc, char *argv[], char *envp[]) {
-    unsigned char buf[4096];
-    int replayFd, ret, bytesWritten, status;
+        unsigned char buf[4096];
+        int replayFd, ret, bytesWritten, status;
 
-    if(argc < 2) {
-        cerr << "Usage " << argv[0] << ": exe_path [arguments] > replay.log" << endl;
-        return 1;
-    }
+        if(argc < 2) {
+                fprintf(stderr, "Usage %s: exe_path [arguments] > replay.log\n", argv[0]);
+                return 1;
+        }
 
-    replayFd = open("/dev/replay0", O_RDONLY | O_CLOEXEC);
-    if(replayFd < 0) {
-        cerr << "could not open /dev/replay device" << endl;
-        return 1;
-    }
-    ret = ioctl(replayFd, REPLAY_IOC_RESET_SPHERE, 0);
-    assert(ret == 0);
+        replayFd = open("/dev/replay0", O_RDONLY | O_CLOEXEC);
+        if(replayFd < 0) {
+                fprintf(stderr, "could not open /dev/replay device\n");
+                return 1;
+        }
+        ret = ioctl(replayFd, REPLAY_IOC_RESET_SPHERE, 0);
+        assert(ret == 0);
 
-    argv++;
-    recordExecve(argv[0], argv, envp);
-    startChild(replayFd, argv, envp, 1);
+        argv++;
+        recordExecve(argv[0], argv, envp);
+        startChild(replayFd, argv, envp, 1);
 
-    while((ret = read(replayFd, buf, sizeof(buf))) > 0) {
-        bytesWritten = write(STDOUT_FILENO, buf, ret);
-        assert(bytesWritten == ret);
-    }
+        while((ret = read(replayFd, buf, sizeof(buf))) > 0) {
+                bytesWritten = write(STDOUT_FILENO, buf, ret);
+                assert(bytesWritten == ret);
+        }
 
-    assert(ret == 0);
+        assert(ret == 0);
 
-    while(wait(&status) != -1)
-        ;
+        while(wait(&status) != -1)
+                ;
 
-    return 0;
+        return 0;
 }

@@ -306,7 +306,7 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                 if(make_copy) {
                         // this is for an emulated system call, we need to replay
                         // the copy to user calls to emulate it properly
-                        ret = kfifo_to_user(&sphere->fifo, (void __user *) (to_addr+idx), len, 
+                        ret = kfifo_to_user(&sphere->fifo, (void __user *) ((long) (to_addr+idx)), len, 
                                             &bytesWritten);
                         if(ret || (len != bytesWritten)) BUG();
                 } else {
@@ -315,12 +315,12 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                         // XXX FIXME we should put something here to check and make 
                         // sure the values are the same
                         for(i = 0; i < len; i++) {
-                                cret = copy_from_user(&ref, (void *) (to_addr+i), sizeof(ref));
+                                cret = copy_from_user(&ref, (void *) ((long) (to_addr+i)), sizeof(ref));
                                 ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
                                 if(ret != sizeof(c)) BUG();
                                 if(c != ref) {
                                         printk(KERN_CRIT "copy_to_user bug at addr %p %d %d %d %d",
-                                               (void *) (to_addr+i), i, c, ref, cret);
+                                               (void *) ((long) (to_addr+i)), i, c, ref, cret);
                                         BUG();
                                 }
                         }
@@ -347,7 +347,10 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
         switch (regs_syscallno(regs)) {
 
-        case __NR_execve: case __NR_brk: case __NR_arch_prctl:
+#ifdef CONFIG_X86_64
+        case __NR_arch_prctl:
+#endif
+        case __NR_execve: case __NR_brk:
         case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
         case __NR_mprotect: case __NR_exit: case __NR_mlock:
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
@@ -358,10 +361,11 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_sigaltstack:
                 return 1;
 
-        case __NR_shmget: case __NR_shmat: case __NR_shmctl:
-        case __NR_vfork: case __NR_shmdt:
+#ifdef CONFIG_X86_64
+        case __NR_shmget: case __NR_shmat: case __NR_shmctl:  case __NR_shmdt:
+#endif
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
-        case __NR_ioperm: case __NR_setsid:
+        case __NR_vfork: case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
                 printk(KERN_CRIT "unhandled syscall %lu\n", regs_syscallno(regs));
                 BUG();
@@ -382,18 +386,16 @@ static void check_reg(char *reg, unsigned long a, unsigned long b) {
 
 static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         // for now we will just check syscall parameters and a few others
-        check_reg("orig_ax", regs->orig_ax, stored_regs->orig_ax);
-        check_reg("ip", regs->ip, stored_regs->ip);
-        check_reg("sp", regs->sp, stored_regs->sp);
-        check_reg("ax", regs->ax, stored_regs->ax);
-        check_reg("cx", regs->cx, stored_regs->cx);
-        check_reg("dx", regs->dx, stored_regs->dx);
-        check_reg("si", regs->si, stored_regs->si);
-        check_reg("di", regs->di, stored_regs->di);
-        check_reg("r8", regs->r8, stored_regs->r8);
-        check_reg("r9", regs->r9, stored_regs->r9);
-        check_reg("r10", regs->r10, stored_regs->r10);
-        check_reg("r11", regs->r11, stored_regs->r11);
+        check_reg("syscallno", regs_syscallno(regs), regs_syscallno(stored_regs));
+        check_reg("ip", regs_ip(regs), regs_ip(stored_regs));
+        check_reg("sp", regs_sp(regs), regs_sp(stored_regs));
+        check_reg("return", regs_return(regs), regs_return(stored_regs));
+        check_reg("first", regs_first(regs), regs_first(stored_regs));
+        check_reg("second", regs_second(regs), regs_second(stored_regs));
+        check_reg("third", regs_third(regs), regs_third(stored_regs));
+        check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
+        check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
+        check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
