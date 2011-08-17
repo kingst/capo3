@@ -337,15 +337,15 @@ static int reexecute_syscall(struct pt_regs *regs) {
         // this is for the mmap optimization, for dlls we assume that they exist on the 
         // system that is replaying and that opening an existing file with O_RDONLY will
         // not affect it
-        if(regs->orig_ax == __NR_open)
-                return ((regs->si & O_ACCMODE) == O_RDONLY);
+        if(regs_syscallno(regs) == __NR_open)
+                return ((regs_second(regs) & O_ACCMODE) == O_RDONLY);
 
         // this is used to detect shared memory threads, something we
         // don't handle yet
-        if(regs->orig_ax == __NR_clone)
-                BUG_ON((regs->di & CLONE_VM) == CLONE_VM);
+        if(regs_syscallno(regs) == __NR_clone)
+                BUG_ON((regs_first(regs) & CLONE_VM) == CLONE_VM);
 
-        switch (regs->orig_ax) {
+        switch (regs_syscallno(regs)) {
 
         case __NR_execve: case __NR_brk: case __NR_arch_prctl:
         case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
@@ -363,7 +363,7 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
         case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
-                printk(KERN_CRIT "unhandled syscall %lu\n", regs->orig_ax);
+                printk(KERN_CRIT "unhandled syscall %lu\n", regs_syscallno(regs));
                 BUG();
                 return 1;
 
@@ -399,33 +399,33 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
         BUG_ON(header->type != syscall_exit_event);        
 
-        if(regs->orig_ax == __NR_open) {
+        if(regs_syscallno(regs) == __NR_open) {
                 // we let an open through, fixup the fd
-                if(regs->ax != header->regs.ax) {
-                        if((regs->ax < 0) && (header->regs.ax >= 0)) {
+                if(regs_return(regs) != regs_return(&header->regs)) {
+                        if((regs_return(regs) < 0) && (regs_return(&header->regs) >= 0)) {
                                 // worked during recording, but not during replay, switch to
                                 // replaying this syscall and hope it is not for an mmap
-                        } else if((regs->ax >= 0) && (header->regs.ax < 0)) {
+                        } else if((regs_return(regs) >= 0) && (regs_return(&header->regs) < 0)) {
                                 // failed during recording, but not now, clean up
-                                sys_close(regs->ax);
-                        } else if(regs->ax != header->regs.ax) {
+                                sys_close(regs_return(regs));
+                        } else if(regs_return(regs) != regs_return(&header->regs)) {
                                 // opened, but with different fd, fixup needed
-                                BUG_ON((regs->ax < 0) || (header->regs.ax < 0));
-                                sys_dup2(regs->ax, header->regs.ax);
-                                sys_close(regs->ax);
+                                BUG_ON((regs_return(regs) < 0) || (regs_return(&header->regs) < 0));
+                                sys_dup2(regs_return(regs), regs_return(&header->regs));
+                                sys_close(regs_return(regs));
                         } else {
-                                BUG_ON(regs->ax != header->regs.ax);
+                                BUG_ON(regs_return(regs) != regs_return(&header->regs));
                         }
-                        regs->ax = header->regs.ax;
+                        set_regs_return(regs, regs_return(&header->regs));
                 }
                 check_regs(regs, &header->regs);
-        } else if(header->regs.orig_ax == __NR_close) {
+        } else if(regs_syscallno(&header->regs) == __NR_close) {
                 // this is for our mmap optimzation
-                sys_close(regs->di);
+                sys_close(regs_first(regs));
                 *regs = header->regs;
-        } else if((header->regs.orig_ax == __NR_dup) ||
-                  (header->regs.orig_ax == __NR_dup2) ||
-                  (header->regs.orig_ax == __NR_dup3)) {
+        } else if((regs_syscallno(&header->regs) == __NR_dup) ||
+                  (regs_syscallno(&header->regs) == __NR_dup2) ||
+                  (regs_syscallno(&header->regs) == __NR_dup3)) {
                 // XXX FIXME
                 // we need to re-execute these if one of the
                 // fds is from our previous open
@@ -434,24 +434,24 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
-        if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve))
+        if((header->type == syscall_exit_event) && (regs_syscallno(&header->regs) == __NR_execve))
                 sphere->replay_first_execve = 1;
 
         if(header->type == syscall_enter_event) {
                 if(sphere->replay_first_execve)
                         check_regs(regs, &header->regs);
                 if(!reexecute_syscall(regs))
-                        regs->orig_ax = __NR_getpid;
+                        set_regs_syscallno(regs, __NR_getpid);
         } else if(header->type == syscall_exit_event) {                
                 handle_mmap_optimization(regs, header);
 
                 // fixup the return value for clone, fork, and vfork
-                if((regs->orig_ax == __NR_clone) ||
-                   (regs->orig_ax == __NR_fork) ||
-                   (regs->orig_ax == __NR_vfork))
-                        regs->ax = header->regs.ax;
+                if((regs_syscallno(regs) == __NR_clone) ||
+                   (regs_syscallno(regs) == __NR_fork) ||
+                   (regs_syscallno(regs) == __NR_vfork))
+                        set_regs_return(regs, regs_return(&header->regs));
 
-                if(regs->orig_ax == __NR_getpid) {
+                if(regs_syscallno(regs) == __NR_getpid) {
                         // emulate system call by copying registers
                         *regs = header->regs;
                 } else if(sphere->replay_first_execve) {
@@ -462,9 +462,7 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
 
         } else if(header->type == instruction_event) {
                 // This is only for rdtsc for now, we can probably copy the entire regs struct
-                regs->ax = header->regs.ax;
-                regs->dx = header->regs.dx;
-                regs->ip = header->regs.ip;
+                *regs = header->regs;
         }
 }
 
@@ -477,7 +475,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         /*
         printk(KERN_CRIT "thread_id = %u\n", thread_id);
         if((event == syscall_enter_event) || (event == syscall_exit_event)) {
-                printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs->orig_ax);
+                printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
         } else {
                 printk(KERN_CRIT "event %u\n", event);
         }
@@ -502,18 +500,18 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                         // also, we replay copy to user for clone system calls because we re-execute
                         // them but the kernel pushes some pid information into userspace that will
                         // be different whey replaying
-                        replay_copy_to_user(sphere, ((regs->orig_ax == __NR_getpid) || (regs->orig_ax == __NR_clone)) 
+                        replay_copy_to_user(sphere, ((regs_syscallno(regs) == __NR_getpid) || (regs_syscallno(regs) == __NR_clone)) 
                                                     && (event == syscall_exit_event));
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
-                        printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
-                        current->rtcb->send_sig |= 1<<header->regs.orig_ax;
-                        send_sig(header->regs.orig_ax, current, 1);
+                        printk(KERN_CRIT "sending signal %ld\n", regs_syscallno(&header->regs));
+                        current->rtcb->send_sig |= 1<<regs_syscallno(&header->regs);
+                        send_sig(regs_syscallno(&header->regs), current, 1);
                 } else {
                         exit_loop = 1;
                         if(header->type != event) {
                                 printk(KERN_CRIT "header->type = %u, type = %u, header->orig_ax %lu, regs->orig_ax = %lu\n", 
-                                       header->type, event, header->regs.orig_ax, regs->orig_ax);
+                                       header->type, event, regs_syscallno(&header->regs), regs_syscallno(regs));
                                 BUG();
                         }
                 }

@@ -317,7 +317,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
         // kernel restarts a system call (as a result of a signal).  Second, on 
         // an sigreturn system call.  Because we re-execute the sigreturn
         // system call then it should be ok to do this.
-        if(((long) regs->orig_ax) < 0)
+        if(((long) regs_syscallno(regs)) < 0)
                 return;
 
         // the logic here deals with signal delivery and the interactions with
@@ -359,19 +359,19 @@ void rr_syscall_exit(struct pt_regs *regs) {
 }
 
 void rr_send_signal(int signo) {
-        unsigned long orig_ax;
+        unsigned long syscallno;
         struct pt_regs *regs;
         sanity_check();
 
         regs = task_pt_regs(current);
 
         if(sphere_is_recording(current->rtcb->sphere)) {
-                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs->orig_ax);
-                orig_ax = regs->orig_ax;
-                regs->orig_ax = signo;
+                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
+                syscallno = regs_syscallno(regs);
+                set_regs_syscallno(regs, signo);
                 record_header(current->rtcb->sphere, signal_event, 
                               current->rtcb->thread_id, regs);
-                regs->orig_ax = orig_ax;
+                set_regs_syscallno(regs, syscallno);
         } else {
                 BUG();
         }
@@ -481,7 +481,7 @@ int rr_general_protection(struct pt_regs *regs) {
 
         sanity_check();
 
-        if(copy_from_user(&opcode, (void *) regs->ip, sizeof(opcode)))
+        if(copy_from_user(&opcode, (void *) regs_ip(regs), sizeof(opcode)))
                 return 0;
 
         // this code is for rdtsc emulation

@@ -17,6 +17,55 @@ typedef struct replay_header {
         struct pt_regs regs;
 } replay_header_t;
 
+static inline unsigned long regs_return(struct pt_regs *regs) {
+        return regs->ax;
+}
+
+static inline void set_regs_return(struct pt_regs *regs, unsigned long val) {
+        regs->ax = val;
+}
+
+static inline unsigned long regs_syscallno(struct pt_regs *regs) {
+        return regs->orig_ax;
+}
+
+static inline void set_regs_syscallno(struct pt_regs *regs, unsigned long val) {
+        regs->orig_ax = val;
+}
+
+static inline unsigned long regs_first(struct pt_regs *regs) {
+        return regs->di;
+}
+
+static inline unsigned long regs_second(struct pt_regs *regs) {
+        return regs->si;
+}
+
+static inline unsigned long regs_third(struct pt_regs *regs) {
+        return regs->dx;
+}
+
+static inline unsigned long regs_fourth(struct pt_regs *regs) {
+        return regs->r10;
+}
+
+static inline unsigned long regs_fifth(struct pt_regs *regs) {
+        return regs->r8;
+}
+
+static inline unsigned long regs_sixth(struct pt_regs *regs) {
+        return regs->r9;
+}
+
+static inline unsigned long regs_ip(struct pt_regs *regs) {
+        return regs->ip;
+}
+
+static inline unsigned long regs_sp(struct pt_regs *regs) {
+        return regs->sp;
+}
+
+
 #ifdef __KERNEL__
 
 #include <linux/kfifo.h>
