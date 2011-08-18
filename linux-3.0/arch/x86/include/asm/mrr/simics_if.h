@@ -27,8 +27,8 @@
 
 /*
  * Magic function with one argument
- * Pass the magic function argument in '%eax'
- * Return value (if any) in '%eax'
+ * Pass the magic function argument in 'reax'
+ * Return value (if any) in '%rax'
  */
 inline static void *my_magic_1(void *a) {
 
@@ -45,17 +45,17 @@ inline static void *my_magic_1(void *a) {
 
 /*
  * Magic function with two arguments
- * Pass the magic function argument in '%eax' and '%ebx'
- * Return value (if any) in '%eax'
+ * Pass the magic function argument in '%rax' and '%rcx'
+ * Return value (if any) in '%rax'
  */
-inline static void *my_magic_2(void *a, void *b) {
+inline static void *my_magic_2(void *a, void *c) {
 
     void *ret;
 
     asm volatile (
         __MAGIC
         : "=a"(ret)             // output
-        : "a"(a), "b"(b)        // input
+        : "a"(a), "c"(c)        // input
     );
 
     return ret;
@@ -63,17 +63,17 @@ inline static void *my_magic_2(void *a, void *b) {
 
 /*
  * Magic function with three arguments
- * Pass the magic function argument in '%eax', '%ebx', and '%ecx'
- * Return value (if any) in '%eax'
+ * Pass the magic function argument in '%rax', '%rcx', and '%rdx'
+ * Return value (if any) in '%rax'
  */
-inline static void *my_magic_3(void *a, void *b, void *c) {
+inline static void *my_magic_3(void *a, void *c, void *d) {
 
     void *ret;
 
     asm volatile (
         __MAGIC
         : "=a"(ret)                 // output
-        : "a"(a), "b"(b), "c"(c)    // input
+        : "a"(a), "c"(c), "d"(d)    // input
     );
 
     return ret;

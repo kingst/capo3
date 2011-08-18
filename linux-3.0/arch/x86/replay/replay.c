@@ -65,6 +65,7 @@
 #include <asm/replay.h>
 #ifdef CONFIG_MRR
 #include <asm/mrr/mrrhw_if.h>
+#include <asm/mrr/simics_if.h>
 #include "mrr_if.h"
 #endif
 
@@ -354,7 +355,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
-                }
+                }                
         } else {
                 if(rtcb->send_sig == 0)
                         replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
@@ -483,13 +484,10 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
             mrr_full_handler(prev_p, true);
         }
     }
-    // set the mrr flag in the flags register, if necessary
-    if (test_ti_thread_flag(task_thread_info(next_p), TIF_RECORD_REPLAY)) {
-        sanity_check(next_p);
-        if (sphere_is_recording(next_p->rtcb->sphere)) {
-            task_pt_regs(next_p)->flags |= MRR_FLAG_MASK;
-        }
-    }
+
+    // no need to the set the MRR flag in next_p here.
+    // it does not work any way and the code in entry_64.S
+    // takes care of that --Nima
 #endif
 
 }

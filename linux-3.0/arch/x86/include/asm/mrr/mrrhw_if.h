@@ -29,7 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #define MRR_VECTOR                  0x7f
-#define MRR_FLAG_MASK               ((unsigned)0x200000)	// bit 21 = ID bit of the eflags register
+#define MRR_FLAG_MASK               (0x200000)	// bit 21 = ID bit of the FLAGS register
 
 #endif // __MRRHW_IF_H__
 

@@ -54,6 +54,10 @@
 #include <asm/ftrace.h>
 #include <asm/percpu.h>
 
+#ifdef CONFIG_MRR
+#include <asm/mrr/mrrhw_if.h>
+#endif
+
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
 #define AUDIT_ARCH_X86_64	(EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
@@ -296,6 +300,35 @@ ENDPROC(native_usergs_sysret64)
 	CFI_REL_OFFSET r15, R15+\offset
 	.endm
 
+#ifdef CONFIG_MRR
+
+#define SETUP_MRR_FLAG_R11(label_id,offset) \
+    testl $_TIF_RECORD_REPLAY, TI_flags(%rcx) ; \
+    jz mrr_continue_##label_id##_unset ; \
+    orq $MRR_FLAG_MASK, R11-ARGOFFSET+offset(%rsp) ; \
+    jmp mrr_continue_##label_id ; \
+mrr_continue_##label_id##_unset: ; \
+    andq $~MRR_FLAG_MASK, R11-ARGOFFSET+offset(%rsp) ; \
+mrr_continue_##label_id:
+
+#define SETUP_MRR_FLAG_EFLAGS(label_id,offset) \
+    testl $_TIF_RECORD_REPLAY, TI_flags(%rcx) ; \
+    jz mrr_continue_##label_id##_unset ; \
+    orq $MRR_FLAG_MASK, EFLAGS-ARGOFFSET+offset(%rsp) ; \
+    jmp mrr_continue_##label_id ; \
+mrr_continue_##label_id##_unset: ; \
+    andq $~MRR_FLAG_MASK, EFLAGS-ARGOFFSET+offset(%rsp) ; \
+mrr_continue_##label_id:
+
+    // simics magic break
+    // pushq %rax
+    // movq $0x0B5000001, %rax
+    // xchg %bx, %bx
+    // popq %rax
+
+#endif    
+    
+
 /* save partial stack frame */
 	.pushsection .kprobes.text, "ax"
 ENTRY(save_args)
@@ -501,6 +534,11 @@ sysret_check:
 	movl TI_flags(%rcx),%edx
 	andl %edi,%edx
 	jnz  sysret_careful
+
+#ifdef CONFIG_MRR
+    SETUP_MRR_FLAG_R11(0, 0)
+#endif
+
 	CFI_REMEMBER_STATE
 	/*
 	 * sysretq will re-enable interrupts:
@@ -848,6 +886,10 @@ retint_swapgs:		/* return to user-space */
 	 */
 	DISABLE_INTERRUPTS(CLBR_ANY)
 	TRACE_IRQS_IRETQ
+#ifdef CONFIG_MRR
+    // set the mrr flag
+    SETUP_MRR_FLAG_EFLAGS(1, 0)
+#endif
 	SWAPGS
 	jmp restore_args
 
