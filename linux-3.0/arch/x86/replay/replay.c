@@ -200,6 +200,8 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 sphere_reset(sphere);
         } else if(cmd == REPLAY_IOC_START_CHUNKING) {
                 ret = sphere_start_chunking(sphere, current->rtcb);
+        } else if(cmd == REPLAY_IOC_SET_CHUNK_LOG_FD) {
+                sfd->is_chunk_log_fd = 1;
         } else {
                 BUG();
                 ret = -EINVAL;

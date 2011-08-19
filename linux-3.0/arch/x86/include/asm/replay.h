@@ -3,10 +3,11 @@
 
 #define REPLAY_IOC_MAGIC 0xf1
 
-#define REPLAY_IOC_START_RECORDING _IO(REPLAY_IOC_MAGIC, 0)
-#define REPLAY_IOC_START_REPLAYING _IO(REPLAY_IOC_MAGIC, 1)
-#define REPLAY_IOC_RESET_SPHERE    _IO(REPLAY_IOC_MAGIC, 2)
-#define REPLAY_IOC_START_CHUNKING  _IO(REPLAY_IOC_MAGIC, 3)
+#define REPLAY_IOC_START_RECORDING   _IO(REPLAY_IOC_MAGIC, 0)
+#define REPLAY_IOC_START_REPLAYING   _IO(REPLAY_IOC_MAGIC, 1)
+#define REPLAY_IOC_RESET_SPHERE      _IO(REPLAY_IOC_MAGIC, 2)
+#define REPLAY_IOC_START_CHUNKING    _IO(REPLAY_IOC_MAGIC, 3)
+#define REPLAY_IOC_SET_CHUNK_LOG_FD  _IO(REPLAY_IOC_MAGIC, 4)
 
 typedef enum {invalid_event=0, execve_event, syscall_enter_event, 
               syscall_exit_event, thread_create_event, thread_exit_event,
