@@ -487,7 +487,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
-        rtcb->has_chunk = 0;
+        rtcb->chunk = NULL;
         tsk->rtcb = rtcb;
 }
 
@@ -501,6 +501,8 @@ void rr_thread_exit(struct pt_regs *regs) {
 
         sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
         current->rtcb = NULL;
+
+        BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }

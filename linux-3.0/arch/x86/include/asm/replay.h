@@ -20,14 +20,14 @@ typedef struct replay_header {
 
 #define NUM_CHUNK_PROC 8
 
-struct chunk_struct {
+typedef struct chunk_struct {
         uint32_t processor_id;
         uint32_t thread_id;
         uint32_t inst_count;
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
-};
+} chunk_t;
 
 #ifdef __KERNEL__
 
@@ -113,8 +113,7 @@ typedef struct replay_thread_control_block {
         uint32_t thread_id;
         uint64_t def_sig;
         uint64_t send_sig;
-        int has_chunk;
-        struct chunk_struct chunk;
+        struct chunk_struct *chunk;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
@@ -126,10 +125,6 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);
 int rr_deliver_signal(int signr, struct pt_regs *regs);
-
-// for chunk replay
-void rr_chunk_begin(struct task_struct *tsk);
-void rr_chunk_end(struct task_struct *tsk);
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt
@@ -165,6 +160,9 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs);
 
+// for chunk replay
+void sphere_chunk_begin(struct task_struct *tsk);
+void sphere_chunk_end(struct task_struct *tsk);
 
 #endif
 
