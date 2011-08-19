@@ -71,6 +71,11 @@ static struct file_operations replay_fops;
 static int replay_major = 0;
 static struct mutex replay_mutex;
 
+typedef struct sphere_file_data {
+        replay_sphere_t *sphere;
+        int is_chunk_log_fd;
+} sphere_fd_t;
+
 #define REPLAY_VERSION	"0.3"
 
 
@@ -78,6 +83,7 @@ static struct mutex replay_mutex;
 
 static int replay_open(struct inode *inode, struct file *file) {
         replay_sphere_t *sphere;
+        sphere_fd_t *sfd;
 
         mutex_lock(&replay_mutex);
         if(inode->i_private == NULL) {
@@ -92,28 +98,43 @@ static int replay_open(struct inode *inode, struct file *file) {
         }
 
         sphere_inc_fd(sphere);
-        file->private_data = sphere;
+        sfd = kmalloc(sizeof(sphere_fd_t), GFP_KERNEL);
+        if(sfd == NULL) {
+                mutex_unlock(&replay_mutex);
+                return -ENOMEM;
+        }
+        sfd->sphere = sphere;
+        sfd->is_chunk_log_fd = 0;
+        file->private_data = sfd;
         mutex_unlock(&replay_mutex);
 
 	return 0;
 }
 
 static int replay_release(struct inode *inode, struct file *file) {
-        replay_sphere_t *sphere = file->private_data;
+        sphere_fd_t *sfd = file->private_data;
+        replay_sphere_t *sphere;
 
-        if(inode->i_private != file->private_data)
+        sphere = sfd->sphere;
+
+        if(inode->i_private != sphere)
                 BUG();
 
         sphere_dec_fd(sphere);
+
+        kfree(sfd);
+        file->private_data = NULL;
 
 	return 0;
 }
 
 static ssize_t replay_write(struct file *file, const char __user *buf, size_t count,
                             loff_t *f_pos) {
+        sphere_fd_t *sfd = file->private_data;
+        int ret;
         replay_sphere_t *sphere;
 
-        sphere = (replay_sphere_t *) file->private_data;
+        sphere = sfd->sphere;
         if(sphere == NULL) {
                 BUG();
                 return -EINVAL;
@@ -123,14 +144,21 @@ static ssize_t replay_write(struct file *file, const char __user *buf, size_t co
                 return -EINVAL;
         }
 
-        return sphere_fifo_from_user(sphere, buf, count);
+        if(sfd->is_chunk_log_fd) {
+                ret = sphere_chunk_fifo_from_user(sphere, buf, count);
+        } else {
+                ret = sphere_fifo_from_user(sphere, buf, count);
+        }
+
+        return ret;
 }
 
 static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
                              loff_t *f_pos) {
+        sphere_fd_t *sfd = file->private_data;
         replay_sphere_t *sphere;
 
-        sphere = (replay_sphere_t *) file->private_data;
+        sphere = sfd->sphere;
         if(sphere == NULL) {
                 BUG();
                 return -EINVAL;
@@ -144,16 +172,20 @@ static ssize_t replay_read(struct file *file, char __user *buf, size_t count,
 }
 
 static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+        sphere_fd_t *sfd = file->private_data;
         replay_sphere_t *sphere;
         int ret = 0;
 
         if(file->private_data == NULL)
                 BUG();
 
-        if(current->rtcb != NULL)
-                BUG();
+        if(cmd == REPLAY_IOC_START_CHUNKING) {
+                BUG_ON(current->rtcb == NULL);
+        } else {
+                BUG_ON(current->rtcb != NULL);
+        }
 
-        sphere = (replay_sphere_t *) file->private_data;
+        sphere = sfd->sphere;
 
         if(cmd == REPLAY_IOC_START_RECORDING) {
                 // the process will call this on itself before
@@ -166,6 +198,8 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 rr_thread_create(current, sphere);
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 sphere_reset(sphere);
+        } else if(cmd == REPLAY_IOC_START_CHUNKING) {
+                ret = sphere_start_chunking(sphere, current->rtcb);
         } else {
                 BUG();
                 ret = -EINVAL;
@@ -453,6 +487,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
+        rtcb->has_chunk = 0;
         tsk->rtcb = rtcb;
 }
 

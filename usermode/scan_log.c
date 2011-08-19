@@ -42,16 +42,12 @@
 **========================================================== 
 */
 
-#include <iostream>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
 
 #include "util.h"
-
-using namespace std;
 
 int main(void) {
         replay_header_t header;
@@ -60,28 +56,29 @@ int main(void) {
         
         while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
                 assert(ret == sizeof(header));
-                cout << header.thread_id << " ";
+                printf("%u ", header.thread_id);
                 if(header.type == syscall_enter_event) {
-                        cout << "syscall_enter_event, syscall = " << header.regs.orig_rax << " arg1 = " 
-                             << (void *) header.regs.rdi << endl;
+                        printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx\n",
+                               header.regs.orig_rax, header.regs.rdi);
                 } else if(header.type == syscall_exit_event) {
-                        cout << "syscall_exit_event,  syscall = " << header.regs.orig_rax << " ret = " << header.regs.rax << endl;
+                        printf("syscall_exit_event, syscall = %ld ret = %ld\n",
+                               header.regs.orig_rax, header.regs.rax);
                 } else if(header.type == thread_create_event) {
-                        cout << "thread_create_event" << endl;
+                        printf("thread_create_event\n");
                 } else if(header.type == thread_exit_event) {
-                        cout << "thread_exit_event" << endl;
+                        printf("thread_exit_event\n");
                 } else if(header.type == instruction_event) {
-                        cout << "instruction_event" << endl;
+                        printf("instruction_event\n");
                 } else if(header.type == execve_event) {
-                        cout << "execve_event" << endl;            
+                        printf("execve_event\n");
                         e = readExecveData();
                 } else if(header.type == copy_to_user_event) {
-                        cout << "copy to user" << endl;
+                        printf("copy_to_user\n");
                         readBuffer();
                 } else if(header.type == signal_event) {
-                        cout << "signal" << endl;
+                        printf("signal\n");
                 } else {
-                        assert(false);
+                        assert(0);
                 }
                 
         }

@@ -1,4 +1,4 @@
-EXE = record replay
+EXE = record replay test scan_log
 
 all: $(EXE)
 

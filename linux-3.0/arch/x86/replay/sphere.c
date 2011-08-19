@@ -67,6 +67,8 @@
 #include <asm/replay.h>
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
+#define CHUNK_BUFFER_SIZE (16*1024)
+#define PRINT_DEBUG 0
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -130,28 +132,29 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         return bytesRead;
 }
 
-static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count, 
+                                    struct kfifo *fifo, cond_t *full_cond, cond_t *next_rec_cond) {
         int ret;
         int bytesWritten=0;
         int favail;
         replay_state_t state;
 
-        while(kfifo_is_full(&sphere->fifo))
-                cond_wait(&sphere->queue_full_cond, &sphere->mutex);
+        while(kfifo_is_full(fifo))
+                cond_wait(full_cond, &sphere->mutex);
 
-        if(kfifo_is_full(&sphere->fifo))
+        if(kfifo_is_full(fifo))
                 BUG();
 
         state = atomic_read(&sphere->state);
         BUG_ON((state != replaying) && (state != idle));
         
-        favail = kfifo_avail(&sphere->fifo);
+        favail = kfifo_avail(fifo);
 
         if(favail < count)
                 count = favail;
 
-        ret = kfifo_from_user(&sphere->fifo, buf, count, &bytesWritten);
-        cond_broadcast(&sphere->next_record_cond);
+        ret = kfifo_from_user(fifo, buf, count, &bytesWritten);
+        cond_broadcast(next_rec_cond);
 
         // it might return -EFAULT, which we will pass back
         if(ret)
@@ -250,7 +253,7 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
                         memset(sphere->header, 0, sizeof(replay_header_t));
                         ret = kfifo_out(&sphere->fifo, sphere->header, sizeof(replay_header_t));
                         if(ret != sizeof(replay_header_t))
-                                BUG();
+                                BUG();                        
                         cond_broadcast(&sphere->queue_full_cond);
                 }
         }
@@ -270,6 +273,8 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
         if((sphere->header == NULL) || (sphere->header->thread_id != thread_id))
                 BUG();
         header = sphere->header;
+        if(header->type == copy_to_user_event)
+                sphere->fifo_head_ctu_buf = 1;
         sphere->header = NULL;
 
         return header;
@@ -474,21 +479,21 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         replay_header_t *header;
         int exit_loop = 0;
 
-        /*
-        printk(KERN_CRIT "thread_id = %u\n", thread_id);
-        if((event == syscall_enter_event) || (event == syscall_exit_event)) {
-                printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
-        } else {
-                printk(KERN_CRIT "event %u\n", event);
+        if(PRINT_DEBUG) {
+                printk(KERN_CRIT "thread_id = %u\n", thread_id);
+                if((event == syscall_enter_event) || (event == syscall_exit_event)) {
+                        printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
+                } else {
+                        printk(KERN_CRIT "event %u\n", event);
+                }
         }
-        */
 
         do {
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
                         BUG();
-
-                //printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
+                
+                if(PRINT_DEBUG) printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
                 // on emulated system calls we will get a number of copy to user
                 // log entries between the system call enter and exit events
                 // so we loop here on copy to user events until we finally
@@ -504,6 +509,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                         // be different whey replaying
                         replay_copy_to_user(sphere, ((regs_syscallno(regs) == __NR_getpid) || (regs_syscallno(regs) == __NR_clone)) 
                                                     && (event == syscall_exit_event));
+                        if(PRINT_DEBUG) printk("done replaying copy_to_user\n");
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
                         printk(KERN_CRIT "sending signal %ld\n", regs_syscallno(&header->regs));
@@ -527,7 +533,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
         } while(!exit_loop);
 
-        //printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
+        if(PRINT_DEBUG) printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
 }
 
 /**********************************************************************************************/
@@ -539,6 +545,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
 replay_sphere_t *sphere_alloc(void) {
         replay_sphere_t *sphere;
+        int i, j;
         sphere = kmalloc(sizeof(replay_sphere_t), GFP_KERNEL);
         if(sphere == NULL) {
                 BUG();
@@ -555,7 +562,15 @@ replay_sphere_t *sphere_alloc(void) {
                 BUG();
                 return NULL;
         }
-        
+
+        sphere->chunk_buffer = vmalloc(CHUNK_BUFFER_SIZE);
+        if(sphere->chunk_buffer == NULL) {
+                vfree(sphere->fifo_buffer);
+                kfree(sphere);
+                BUG();
+                return NULL;
+        }
+
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         cond_init(&sphere->queue_full_cond);
         cond_init(&sphere->queue_empty_cond);
@@ -563,6 +578,22 @@ replay_sphere_t *sphere_alloc(void) {
         sphere->num_threads = 0;
         atomic_set(&sphere->fd_count, 0);
         sphere->header = NULL;
+
+        kfifo_init(&sphere->chunk_fifo, sphere->chunk_buffer, CHUNK_BUFFER_SIZE);
+        cond_init(&sphere->chunk_queue_full_cond);
+        cond_init(&sphere->chunk_next_record_cond);
+        // XXX FIXME check allocation errors
+        sphere->proc_sem = (struct semaphore **) 
+                kmalloc(NUM_CHUNK_PROC*sizeof(struct semaphore *), GFP_KERNEL);
+        for(i = 0; i < NUM_CHUNK_PROC; i++) {
+                sphere->proc_sem[i] = (struct semaphore *) 
+                        kmalloc(NUM_CHUNK_PROC * sizeof(struct semaphore), GFP_KERNEL);
+                for(j = 0; j < NUM_CHUNK_PROC; j++) {
+                        sema_init(&sphere->proc_sem[i][j], 0);
+                }
+        }
+        sphere->next_chunk = NULL;
+        sphere->is_chunk_replay = 0;
 
         mutex_init(&sphere->mutex);
 
@@ -580,6 +611,10 @@ void sphere_reset(replay_sphere_t *sphere) {
                 printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         sphere->fifo_head_ctu_buf = 0;
+        sphere->is_chunk_replay = 0;
+        // XXX FIXME we should do something to reset the proc_sem semaphores
+        // or throw a bug if there are any threads waiting on them or they
+        // have values
         mutex_unlock(&sphere->mutex);
 }
 
@@ -597,6 +632,13 @@ int sphere_is_replaying(replay_sphere_t *sphere) {
         return sphere_is_state(sphere, replaying);
 }
 
+int sphere_is_chunk_replaying(replay_sphere_t *sphere) {
+        // XXX FIXME we probably need to lock here because we are accessing
+        // is_chunk_replay, even though it only gets set at beginning of replay
+        BUG_ON(sphere->is_chunk_replay && !sphere_is_replaying(sphere));
+        return sphere_is_replaying(sphere) && sphere->is_chunk_replay;
+}
+
 void sphere_inc_fd(replay_sphere_t *sphere) {
         atomic_inc(&sphere->fd_count);
 }
@@ -609,7 +651,17 @@ void sphere_dec_fd(replay_sphere_t *sphere) {
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
         mutex_lock(&sphere->mutex);
-        ret = sphere_fifo_from_user_ll(sphere, buf, count);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->fifo, 
+                                       &sphere->queue_full_cond, &sphere->next_record_cond);
+        mutex_unlock(&sphere->mutex);
+        return ret;
+}
+
+int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(&sphere->mutex);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->chunk_fifo, 
+                                       &sphere->chunk_queue_full_cond, &sphere->chunk_next_record_cond);
         mutex_unlock(&sphere->mutex);
         return ret;
 }
@@ -637,6 +689,18 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
 
         mutex_lock(&sphere->mutex);
         ret = start_record_replay(sphere, replaying);
+        mutex_unlock(&sphere->mutex);
+
+        return ret;
+}
+
+int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
+        int ret = 0;
+
+        mutex_lock(&sphere->mutex);
+        BUG_ON(!sphere_is_replaying(sphere));
+        sphere->is_chunk_replay = 1;
+        rtcb->has_chunk = 0;
         mutex_unlock(&sphere->mutex);
 
         return ret;
