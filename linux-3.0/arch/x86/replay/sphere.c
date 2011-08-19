@@ -242,7 +242,8 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         int len, ret;
 
         // if someone is in the middle of processing a copy to
-        // user buffer, just exit immediately
+        // user buffer, just exit immediately because the data on the fifo
+        // will not be a header, it will be copy to user data
         if(sphere->fifo_head_ctu_buf)
                 return 0;
 
@@ -273,6 +274,9 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
         if((sphere->header == NULL) || (sphere->header->thread_id != thread_id))
                 BUG();
         header = sphere->header;
+        // make sure to set the ctu_buf value before setting the sphere header back to NULL
+        // this prevents any other threads from accesing the fifo even though the header is
+        // NULL
         if(header->type == copy_to_user_event)
                 sphere->fifo_head_ctu_buf = 1;
         sphere->header = NULL;
