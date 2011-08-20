@@ -23,6 +23,8 @@
 #define __MRR_INST_TERMINATE_CHUNK              ".byte 0x0F, 0x38, 0x52 ;"
 #define __MRR_INST_FLUSH_BUFFER                 ".byte 0x0F, 0x38, 0x53 ;"
 #define __MRR_INST_FLUSH_MRR                    ".byte 0x0F, 0x38, 0x54 ;"
+#define __MRR_INST_RECORD                       ".byte 0x0F, 0x38, 0x55 ;"
+#define __MRR_INST_REPLAY                       ".byte 0x0F, 0x38, 0x56 ;"
 
 ////////////////////////////////////////////////////////////////////////////////
 // Misc contants

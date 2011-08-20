@@ -10,6 +10,8 @@
 #define mrr_disable_chunking()  asm volatile ( __MRR_INST_DISABLE_CHUNKING )
 #define mrr_enable_chunking()   asm volatile ( __MRR_INST_ENABLE_CHUNKING )
 #define mrr_terminate_chunk()   asm volatile ( __MRR_INST_TERMINATE_CHUNK )
+#define mrr_set_record()        asm volatile ( __MRR_INST_RECORD )
+#define mrr_set_replay()        asm volatile ( __MRR_INST_REPLAY )
 
 static inline int mrr_flush_buffer(void *paddr, int actor_id) {
 
@@ -49,6 +51,8 @@ void set_mrr_full_handler_cb(mrr_full_handler_sig cb);
 #define mrr_disable_chunking()          ((void) 0)
 #define mrr_enable_chunking()           ((void) 0)
 #define mrr_terminate_chunk()           ((void) 0)
+#define mrr_set_record()                ((void) 0)
+#define mrr_set_replay()                ((void) 0)
 #define mrr_flush_buffer(nthg,nthg1)    ((void) 0)
 #define mrr_flush(nthg,nthg1)           ((void) 0)
 

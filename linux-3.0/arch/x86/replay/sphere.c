@@ -65,6 +65,9 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#ifdef CONFIG_MRR
+#include "mrr_if.h"
+#endif
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
 
@@ -198,6 +201,17 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
 
         if(atomic_read(&sphere->state) != recording)
                 BUG();
+
+        // is this the first time we see execve in the sphere?
+        if((syscall_exit_event == event) && (__NR_execve == regs->orig_ax)) {
+                if (!sphere->first_execve) {
+                    my_magic_message("recording the first execve");
+                }
+                sphere->first_execve = 1;
+        #ifdef CONFIG_MRR
+                prepare_mrr(current);
+        #endif
+        }
 
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
         if(ret != sizeof(type)) return -1;
@@ -438,11 +452,19 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
-        if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve))
-                sphere->replay_first_execve = 1;
+
+        if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve)) {
+                if (!sphere->first_execve) {
+                    my_magic_message("replaying the first execve");
+                }
+                sphere->first_execve = 1;
+        #ifdef CONFIG_MRR
+                prepare_mrr(current);
+        #endif
+        }
 
         if(header->type == syscall_enter_event) {
-                if(sphere->replay_first_execve)
+                if(sphere->first_execve)
                         check_regs(regs, &header->regs);
                 if(!reexecute_syscall(regs))
                         regs->orig_ax = __NR_getpid;
@@ -458,7 +480,7 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
                 if(regs->orig_ax == __NR_getpid) {
                         // emulate system call by copying registers
                         *regs = header->regs;
-                } else if(sphere->replay_first_execve) {
+                } else if(sphere->first_execve) {
                         // re-executed syscall, check regs to make sure
                         // everything is on track after first execve
                         check_regs(regs, &header->regs);
@@ -552,7 +574,8 @@ replay_sphere_t *sphere_alloc(void) {
  
         atomic_set(&sphere->state, done);
         sphere->next_thread_id = 0;
-        sphere->replay_first_execve = 0;
+        sphere->first_execve = 0;
+        sphere->fifo_head_ctu_buf = 0;
         sphere->fifo_buffer = vmalloc(LOG_BUFFER_SIZE);
         if(sphere->fifo_buffer == NULL) {
                 kfree(sphere);
@@ -579,7 +602,7 @@ void sphere_reset(replay_sphere_t *sphere) {
                 BUG();
         atomic_set(&sphere->state, idle);
         sphere->next_thread_id = 1;
-        sphere->replay_first_execve = 0;
+        sphere->first_execve = 0;
         if(kfifo_len(&sphere->fifo) > 0)
                 printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);

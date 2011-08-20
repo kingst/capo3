@@ -2,8 +2,7 @@
 #include <linux/ptrace.h>
 #include <linux/kfifo.h>
 #include <asm/replay.h>
-#include <asm/mrr/mrrhwsw_if.h>
-#include <asm/mrr/simics_if.h>
+#include "mrr_if.h"
 
 #define MSG_PREFIX "KernelMrr: "
 
@@ -36,6 +35,27 @@ void mrr_full_handler(struct task_struct *tsk, bool complete_flush) {
 
 }
 
+void prepare_mrr(struct task_struct *tsk) {
+
+    // we should only enable mrr chunking after the first execve
+    // since we do not want to record/replay the driver program
+    // (since it behaves differently in record and replay modes)
+    if (tsk->rtcb->sphere->first_execve) {
+
+        // set the mrr hardware into proper mode
+        if (sphere_is_recording(tsk->rtcb->sphere)) {
+            //my_magic_message("putting the processor in record mode");
+            mrr_set_record();
+        } else if (sphere_is_replaying(tsk->rtcb->sphere)) {
+            //my_magic_message("putting the processor in replay mode");
+            mrr_set_replay();
+        }
+        
+        // set the chunking flag for the thread
+        //my_magic_message("setting TIF_MRR_CHUNKING");
+        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
+    }
+}
 
 static int __init replay_mrr_if_init(void) {
     set_mrr_full_handler_cb(&mrr_full_handler);

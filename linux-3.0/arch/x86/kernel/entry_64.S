@@ -303,7 +303,7 @@ ENDPROC(native_usergs_sysret64)
 #ifdef CONFIG_MRR
 
 #define SETUP_MRR_FLAG_R11(label_id,offset) \
-    testl $_TIF_RECORD_REPLAY, TI_flags(%rcx) ; \
+    testl $_TIF_MRR_CHUNKING, TI_flags(%rcx) ; \
     jz mrr_continue_##label_id##_unset ; \
     orq $MRR_FLAG_MASK, R11-ARGOFFSET+offset(%rsp) ; \
     jmp mrr_continue_##label_id ; \
@@ -312,7 +312,7 @@ mrr_continue_##label_id##_unset: ; \
 mrr_continue_##label_id:
 
 #define SETUP_MRR_FLAG_EFLAGS(label_id,offset) \
-    testl $_TIF_RECORD_REPLAY, TI_flags(%rcx) ; \
+    testl $_TIF_MRR_CHUNKING, TI_flags(%rcx) ; \
     jz mrr_continue_##label_id##_unset ; \
     orq $MRR_FLAG_MASK, EFLAGS-ARGOFFSET+offset(%rsp) ; \
     jmp mrr_continue_##label_id ; \

@@ -44,7 +44,7 @@ typedef struct replay_sphere {
         uint32_t next_thread_id;
         int num_threads;
         replay_header_t *header;
-        int replay_first_execve;
+        int first_execve;
 } replay_sphere_t;
 
 
@@ -60,6 +60,7 @@ typedef struct replay_thread_control_block {
 #endif
 } rtcb_t;
 
+void rr_execve(void);
 void rr_syscall_enter(struct pt_regs *regs);
 void rr_syscall_exit(struct pt_regs *regs);
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);

@@ -64,8 +64,6 @@
 
 #include <asm/replay.h>
 #ifdef CONFIG_MRR
-#include <asm/mrr/mrrhw_if.h>
-#include <asm/mrr/simics_if.h>
 #include "mrr_if.h"
 #endif
 
@@ -262,6 +260,7 @@ static void sanity_check(struct task_struct *tsk) {
                 BUG();
 }
 
+
 static int get_signr(rtcb_t *rtcb) {
         int idx;
         uint64_t def_sig = rtcb->def_sig;
@@ -276,6 +275,7 @@ static int get_signr(rtcb_t *rtcb) {
         BUG();
         return -1;       
 }
+
 
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
@@ -355,10 +355,11 @@ void rr_syscall_exit(struct pt_regs *regs) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
-                }                
+                }            
         } else {
-                if(rtcb->send_sig == 0)
+                if(rtcb->send_sig == 0) {
                         replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                }
         }
 }
 
@@ -465,6 +466,15 @@ void rr_thread_exit(struct pt_regs *regs) {
 
         sanity_check(current);
 
+#ifdef CONFIG_MRR
+    // flush the mrr buffer, if necessary
+    if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
+        if (sphere_is_recording(current->rtcb->sphere) && test_tsk_thread_flag(current, TIF_MRR_CHUNKING)) {
+            mrr_full_handler(current, true);
+        }
+    }
+#endif
+
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
 
@@ -478,16 +488,17 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
 
 #ifdef CONFIG_MRR
     // flush the mrr buffer, if necessary
-    if (test_ti_thread_flag(task_thread_info(prev_p), TIF_RECORD_REPLAY)) {
+    if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
         sanity_check(prev_p);
-        if (sphere_is_recording(prev_p->rtcb->sphere)) {
+        if (sphere_is_recording(prev_p->rtcb->sphere) && test_tsk_thread_flag(prev_p, TIF_MRR_CHUNKING)) {
             mrr_full_handler(prev_p, true);
         }
     }
 
-    // no need to the set the MRR flag in next_p here.
-    // it does not work any way and the code in entry_64.S
-    // takes care of that --Nima
+    if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
+        sanity_check(next_p);
+        prepare_mrr(next_p);
+    }
 #endif
 
 }

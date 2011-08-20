@@ -383,6 +383,12 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	unsigned fsindex, gsindex;
 	bool preload_fpu;
 
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
+           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
+                rr_switch_to(prev_p, next_p);
+#endif
+
 	/*
 	 * If the task has used fpu the last 5 timeslices, just do a full
 	 * restore of the math state immediately to avoid the trap; the
@@ -479,12 +485,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	percpu_write(kernel_stack,
 		  (unsigned long)task_stack_page(next_p) +
 		  THREAD_SIZE - KERNEL_STACK_OFFSET);
-
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
-           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
-                rr_switch_to(prev_p, next_p);
-#endif
 
 	/*
 	 * Now maybe reload the debug registers and handle I/O bitmaps
