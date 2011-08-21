@@ -51,6 +51,10 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 asmlinkage extern void ret_from_fork(void);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
