@@ -126,7 +126,7 @@ do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 	long error_code, siginfo_t *info)
 {
 	struct task_struct *tsk = current;
-
+        
 #ifdef CONFIG_X86_32
 	if (regs->flags & X86_VM_MASK) {
 		/*
@@ -547,7 +547,7 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	int user_icebp = 0;
 	unsigned long dr6;
 	int si_code;
-
+                
 	get_debugreg(dr6, 6);
 
 	/* Filter out all the reserved bits which are preset to 1 */
@@ -583,9 +583,61 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	/* It's safe to allow irq's after DR6 has been saved */
 	preempt_conditional_sti(regs);
 
+#ifdef CONFIG_RECORD_REPLAY
+        /* 
+         * This code will detect if we are currently replaying a process. If so it
+         * will enforce memory interleaving, and handle resetting the single
+         * stepping functionality so that we do not go past the end of a chunk.
+         */
+
+        /* TODO
+         * I'm not sure right now if this is the exact place to put this code. It
+         * might need to be inserted prior to some of the code above so that it
+         * short circuits the normal handling, but I haven't verified this yet. So
+         * be cognizant that unexpected bahvior is occurring to look in this
+         * direction. 
+         */
+        char * ls = "for";
+        //if(1 && (test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) ||
+                        //(strcmp(tsk->comm,ls) == 0))){
+        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) &&
+                        sphere_is_replaying(tsk->rtcb->sphere)){
+
+        //if(user_mode(regs) && strcmp(tsk->comm,ls) == 0){
+        //if(user_mode(regs)){ 
+                //printk(KERN_CRIT "In Traps and handling reset of single step\n");
+                //set_tsk_thread_flag(current, TIF_SYSCALL_TRACE);
+                //clear_tsk_thread_flag(current, TIF_SYSCALL_EMU);
+                
+                //user_enable_single_step(tsk);
+
+                regs->flags |= X86_EFLAGS_TF;
+                //tsk->thread.debugreg6 |= DR_STEP;
+                //tsk->thread.debugreg6 |= DR_TRAP1;
+                //set_tsk_thread_flag(current, TIF_FORCED_TF);
+                //set_tsk_thread_flag(current, TIF_SINGLESTEP);
+                //set_tsk_thread_flag(current, TIF_SYSCALL_TRACE);
+
+                if(test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){
+                        tsk->rtcb->numInst++;
+                        printk(KERN_CRIT "The current instruction is: %llu\n",
+                                        tsk->rtcb->numInst++);
+                }
+                /*
+                printk(KERN_INFO
+                                "a: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx\n",
+                                tsk->comm, tsk->pid,
+                                regs->ip, regs->sp, regs->flags);
+                                */
+                preempt_conditional_cli(regs);
+                return;
+        }
+#endif
+
 	if (regs->flags & X86_VM_MASK) {
 		handle_vm86_trap((struct kernel_vm86_regs *) regs,
 				error_code, 1);
+                printk(KERN_CRIT "Handling a vm86 trap\n");
 		preempt_conditional_cli(regs);
 		return;
 	}
@@ -601,10 +653,13 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 		tsk->thread.debugreg6 &= ~DR_STEP;
 		set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
 		regs->flags &= ~X86_EFLAGS_TF;
+                printk(KERN_CRIT "Handling a step through system call trap\n");
 	}
 	si_code = get_si_code(tsk->thread.debugreg6);
-	if (tsk->thread.debugreg6 & (DR_STEP | DR_TRAP_BITS) || user_icebp)
+	if (tsk->thread.debugreg6 & (DR_STEP | DR_TRAP_BITS) || user_icebp){
+                printk(KERN_CRIT "Special spot prior to sigtrap\n");
 		send_sigtrap(tsk, regs, error_code, si_code);
+        }
 	preempt_conditional_cli(regs);
 
 	return;
@@ -857,7 +912,7 @@ void __init trap_init(void)
 #ifdef CONFIG_X86_32
 	set_task_gate(8, GDT_ENTRY_DOUBLEFAULT_TSS);
 #else
-	set_intr_gate_ist(8, &double_fault, DOUBLEFAULT_STACK);
+        set_intr_gate_ist(8, &double_fault, DOUBLEFAULT_STACK);
 #endif
 	set_intr_gate(9, &coprocessor_segment_overrun);
 	set_intr_gate(10, &invalid_TSS);

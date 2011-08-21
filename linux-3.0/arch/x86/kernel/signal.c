@@ -751,6 +751,12 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	tracehook_signal_handler(sig, info, ka, regs,
 				 test_thread_flag(TIF_SINGLESTEP));
 
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(next, TIF_RECORD_REPLAY)){
+                rr_set_single_step(next);
+        }
+#endif
+
 	return 0;
 }
 
@@ -867,6 +873,12 @@ do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
 #ifdef CONFIG_X86_32
 	clear_thread_flag(TIF_IRET);
 #endif /* CONFIG_X86_32 */
+        /*
+        printk(KERN_INFO
+                        "c: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx\n",
+                        current->comm, current->pid,
+                        regs->ip, regs->sp, regs->flags);
+                        */
 }
 
 void signal_fault(struct pt_regs *regs, void __user *frame, char *where)
