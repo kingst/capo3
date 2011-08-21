@@ -30,8 +30,9 @@
 // Misc contants
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MRR_VECTOR                  0x7f
-#define MRR_FLAG_MASK               (0x200000)	// bit 21 = ID bit of the FLAGS register
+#define MRR_CHUNK_DONE_VECTOR               (0x7e)
+#define MRR_FULL_VECTOR                     (0x7f)
+#define MRR_FLAG_MASK                       (0x200000)	// bit 21 = ID bit of the FLAGS register
 
 #endif // __MRRHW_IF_H__
 

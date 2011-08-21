@@ -1165,6 +1165,7 @@ errorentry alignment_check do_alignment_check
 zeroentry simd_coprocessor_error do_simd_coprocessor_error
 #ifdef CONFIG_MRR
 zeroentry mrr_full do_mrr_full
+zeroentry mrr_chunk_done do_mrr_chunk_done
 #endif
 
 	/* Reload gs selector with exception handling */

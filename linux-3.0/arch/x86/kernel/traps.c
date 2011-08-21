@@ -877,8 +877,10 @@ void __init trap_init(void)
 		set_bit(i, used_vectors);
 
 #ifdef CONFIG_MRR
-	set_intr_gate(MRR_VECTOR, &mrr_full);
-	set_bit(MRR_VECTOR, used_vectors);
+	set_intr_gate(MRR_CHUNK_DONE_VECTOR, &mrr_chunk_done);
+	set_bit(MRR_CHUNK_DONE_VECTOR, used_vectors);
+	set_intr_gate(MRR_FULL_VECTOR, &mrr_full);
+	set_bit(MRR_FULL_VECTOR, used_vectors);
 #endif
 
 #ifdef CONFIG_IA32_EMULATION

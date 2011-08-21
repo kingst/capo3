@@ -470,7 +470,7 @@ void rr_thread_exit(struct pt_regs *regs) {
     // flush the mrr buffer, if necessary
     if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
         if (sphere_is_recording(current->rtcb->sphere) && test_tsk_thread_flag(current, TIF_MRR_CHUNKING)) {
-            mrr_full_handler(current, true);
+            mrr_buffer_full_handler(current, true);
         }
     }
 #endif
@@ -491,7 +491,7 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
     if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
         sanity_check(prev_p);
         if (sphere_is_recording(prev_p->rtcb->sphere) && test_tsk_thread_flag(prev_p, TIF_MRR_CHUNKING)) {
-            mrr_full_handler(prev_p, true);
+            mrr_buffer_full_handler(prev_p, true);
         }
     }
 

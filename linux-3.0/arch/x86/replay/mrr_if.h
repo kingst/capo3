@@ -5,7 +5,7 @@
 #include <asm/mrr/mrrhw_if.h>
 #include <asm/mrr/simics_if.h>
 
-void mrr_full_handler(struct task_struct *tsk, bool complete_flush);
+void mrr_buffer_full_handler(struct task_struct *tsk, bool complete_flush);
 void prepare_mrr(struct task_struct *tsk);
 
 #endif /* _ASM_X86_REPLAY_MRR_IF_H */

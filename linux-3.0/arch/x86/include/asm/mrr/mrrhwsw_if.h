@@ -40,11 +40,13 @@ static inline int mrr_flush(void *paddr, int actor_id) {
 }
 
 /**
- * The call-back that is called to handle MRR-full exceptions.
+ * call-backs called to handle MRR exceptions.
  */
 struct task_struct;
-typedef void (*mrr_full_handler_sig)(struct task_struct *tsk, bool complete_flush);
-void set_mrr_full_handler_cb(mrr_full_handler_sig cb);
+typedef void (*mrr_buffer_full_handler_sig)(struct task_struct *tsk, bool complete_flush);
+void set_mrr_buffer_full_handler_cb(mrr_buffer_full_handler_sig cb);
+typedef void (*mrr_chunk_done_handler_sig)(struct task_struct *tsk);
+void set_mrr_chunk_done_handler_cb(mrr_chunk_done_handler_sig cb);
 
 #else
 

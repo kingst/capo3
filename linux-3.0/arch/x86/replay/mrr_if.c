@@ -7,17 +7,19 @@
 #define MSG_PREFIX "KernelMrr: "
 
 /*
- * this function will have the processor dump the mrr chunks data
- * to the provided buffer
+ * For recording mode. this function will have the processor 
+ * dump the mrr chunks data to the provided buffer.
  */
-void mrr_full_handler(struct task_struct *tsk, bool complete_flush) {
+void mrr_buffer_full_handler(struct task_struct *tsk, bool complete_flush) {
 
     if (NULL == tsk->rtcb) {
-        printk(KERN_ERR MSG_PREFIX "mrr_full_handler invoked on invalid RTCB.");
+        printk(KERN_ERR MSG_PREFIX "mrr_buffer_full_handler invoked on invalid RTCB.");
         BUG();
     }
 
+    // this should be during recording
     if (sphere_is_recording(tsk->rtcb->sphere)) {
+
         // flush the on-processor buffer into the rtcb buffer
         int dump_size;
         void *buf_addr = &tsk->rtcb->chunk_size_buffer;
@@ -32,8 +34,28 @@ void mrr_full_handler(struct task_struct *tsk, bool complete_flush) {
         // copy the rtcb buffer into the rscb buffer
         // ...        
     }
-
+    
 }
+
+
+/*
+ * For replaying mode.
+ */
+void mrr_chunk_done_handler(struct task_struct *tsk) {
+
+    if (NULL == tsk->rtcb) {
+        printk(KERN_ERR MSG_PREFIX "mrr_chunk_done_handler invoked on invalid RTCB.");
+        BUG();
+    }
+
+    // this should be during replay
+    if (sphere_is_replaying(tsk->rtcb->sphere)) {
+        // for debugging: print a message and break
+        my_magic_message("in chunk done handler.");
+        my_sim_break();
+    }
+}
+
 
 void prepare_mrr(struct task_struct *tsk) {
 
@@ -58,8 +80,10 @@ void prepare_mrr(struct task_struct *tsk) {
 }
 
 static int __init replay_mrr_if_init(void) {
-    set_mrr_full_handler_cb(&mrr_full_handler);
-    printk(KERN_INFO "set the mrr_full_handler call back");
+    set_mrr_buffer_full_handler_cb(&mrr_buffer_full_handler);
+    printk(KERN_INFO "set the mrr_buffer_full_handler call back");
+    set_mrr_chunk_done_handler_cb(&mrr_chunk_done_handler);
+    printk(KERN_INFO "set the mrr_chunk_done_handler call back");
 	return 0;
 }
 

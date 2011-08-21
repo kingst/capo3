@@ -39,6 +39,7 @@ asmlinkage void machine_check(void);
 #endif /* CONFIG_X86_MCE */
 asmlinkage void simd_coprocessor_error(void);
 #ifdef CONFIG_MRR
+asmlinkage void mrr_chunk_done(void);
 asmlinkage void mrr_full(void);
 #endif
 
@@ -71,6 +72,7 @@ dotraplinkage void do_simd_coprocessor_error(struct pt_regs *, long);
 dotraplinkage void do_iret_error(struct pt_regs *, long);
 #endif
 #ifdef CONFIG_MRR
+dotraplinkage void do_mrr_chunk_done(void);
 dotraplinkage void do_mrr_full(void);
 #endif
 
