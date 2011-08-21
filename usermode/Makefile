@@ -2,8 +2,8 @@ EXE = record replay test scan_log
 
 all: $(EXE)
 
-CC = g++
-CFLAGS = -g -W -Wall -I ../linux-3.0/arch/x86/include
+CC = gcc
+CFLAGS = -g -W -Wall
 LDFLAGS = -static
 
 SHARED_OBJS = util.o
@@ -28,13 +28,13 @@ replay: $(ROBJS)
 record: $(LOBJS)
 	$(CC) -o $@ $(LDFLAGS) $(CFLAGS) $(LOBJS)
 
-%.d: %.cpp
+%.d: %.c
 	@echo "Calculating dependencies of $<..."
 	@set -e; $(CC) -MM $(CFLAGS) $< \
 		| sed 's/\($*\)\.o[ :]*/\1.o $@ : /g' > $@; 
 	@[ -s $@ ] || rm -f $@
 
-%.o: %.cpp
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

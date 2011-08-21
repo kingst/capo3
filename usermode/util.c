@@ -44,6 +44,8 @@
 
 #include "util.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 
 void startRecording(int replayFd) {
@@ -68,7 +70,7 @@ pid_t startChild(int replayFd, char *argv[], char *envp[], int rec) {
             startReplaying(replayFd);
         }
         execve(argv[0], argv, envp);
-        assert(false);
+        assert(0);
     }
 
     return pid;
@@ -82,7 +84,7 @@ char *readString(void) {
     ret = read(STDIN_FILENO, &len, sizeof(len));
     assert(ret == sizeof(len));
 
-    str = new char[len+1];
+    str = (char *) malloc(len+1);
     str[len] = '\0';
 
     ret = read(STDIN_FILENO, str, len);
@@ -108,7 +110,7 @@ char *readBuffer(void) {
 
     to_addr = readUInt64();
     str = readString();
-    delete [] str;
+    free(str);
     
     return NULL;
 }
@@ -125,19 +127,19 @@ int32_t readInt32() {
 
 struct execve_data *readExecveData(void) {
     int32_t idx;
-    struct execve_data *e = new struct execve_data;
+    struct execve_data *e = malloc(sizeof(struct execve_data));
 
     e->fileName = readString();
     
     e->argc = readInt32();
-    e->argv = new char *[e->argc+1];
+    e->argv = malloc(sizeof(char *)*(e->argc+1));
     e->argv[e->argc] = NULL;
     for(idx = 0; idx < e->argc; idx++) {
         e->argv[idx] = readString();
     }
 
     e->envc = readInt32();
-    e->envp = new char *[e->envc+1];
+    e->envp = malloc(sizeof(char *)*(e->envc+1));
     e->envp[e->envc] = NULL;
     for(idx = 0; idx < e->envc; idx++) {
         e->envp[idx] = readString();

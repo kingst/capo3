@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#ifdef __x86_64__
 struct pt_regs {
     unsigned long r15;
     unsigned long r14;
@@ -34,9 +35,36 @@ struct pt_regs {
     /* top of stack page */
 };
 
+#elif __i386__
+
+struct pt_regs {
+	long ebx;
+	long ecx;
+	long edx;
+	long esi;
+	long edi;
+	long ebp;
+	long eax;
+	int  xds;
+	int  xes;
+	int  xfs;
+	int  xgs;
+	long orig_eax;
+	long eip;
+	int  xcs;
+	long eflags;
+	long esp;
+	int  xss;
+};
+
+#else
+
+#error "architecture not supported"
+
+#endif
 
 
-#include <asm/replay.h>
+#include "../linux-3.0/arch/x86/include/asm/replay.h"
 
 pid_t startChild(int replayFd, char *argv[], char *envp[], int rec);
 
