@@ -3,9 +3,11 @@
 
 #define REPLAY_IOC_MAGIC 0xf1
 
-#define REPLAY_IOC_START_RECORDING _IO(REPLAY_IOC_MAGIC, 0)
-#define REPLAY_IOC_START_REPLAYING _IO(REPLAY_IOC_MAGIC, 1)
-#define REPLAY_IOC_RESET_SPHERE    _IO(REPLAY_IOC_MAGIC, 2)
+#define REPLAY_IOC_START_RECORDING   _IO(REPLAY_IOC_MAGIC, 0)
+#define REPLAY_IOC_START_REPLAYING   _IO(REPLAY_IOC_MAGIC, 1)
+#define REPLAY_IOC_RESET_SPHERE      _IO(REPLAY_IOC_MAGIC, 2)
+#define REPLAY_IOC_START_CHUNKING    _IO(REPLAY_IOC_MAGIC, 3)
+#define REPLAY_IOC_SET_CHUNK_LOG_FD  _IO(REPLAY_IOC_MAGIC, 4)
 
 typedef enum {invalid_event=0, execve_event, syscall_enter_event, 
               syscall_exit_event, thread_create_event, thread_exit_event,
@@ -17,10 +19,61 @@ typedef struct replay_header {
         struct pt_regs regs;
 } replay_header_t;
 
+#define NUM_CHUNK_PROC 8
+
+typedef struct chunk_struct {
+        uint32_t processor_id;
+        uint32_t thread_id;
+        uint32_t inst_count;
+        uint32_t succ_vec[NUM_CHUNK_PROC];
+        uint32_t pred_vec[NUM_CHUNK_PROC];
+        unsigned long ip;
+} chunk_t;
+
 #ifdef __KERNEL__
+
+#ifdef CONFIG_X86_64
+
+static inline unsigned long regs_return(struct pt_regs *regs) {return regs->ax;}
+static inline void set_regs_return(struct pt_regs *regs, unsigned long val) {regs->ax = val;}
+static inline unsigned long regs_syscallno(struct pt_regs *regs) {return regs->orig_ax;}
+static inline void set_regs_syscallno(struct pt_regs *regs, unsigned long val) {regs->orig_ax = val;}
+static inline unsigned long regs_first(struct pt_regs *regs) {return regs->di;}
+static inline unsigned long regs_second(struct pt_regs *regs) {return regs->si;}
+static inline unsigned long regs_third(struct pt_regs *regs) {return regs->dx;}
+static inline unsigned long regs_fourth(struct pt_regs *regs) {return regs->r10;}
+static inline unsigned long regs_fifth(struct pt_regs *regs) {return regs->r8;}
+static inline unsigned long regs_sixth(struct pt_regs *regs) {return regs->r9;}
+static inline unsigned long regs_ip(struct pt_regs *regs) {return regs->ip;}
+static inline unsigned long regs_sp(struct pt_regs *regs) {return regs->sp;}
+
+//#elif CONFIG_X86_32
+#elif 0
+
+#error "support for 32 bit not working yet"
+
+static inline unsigned long regs_return(struct pt_regs *regs) {return regs->ax;}
+static inline void set_regs_return(struct pt_regs *regs, unsigned long val) {regs->ax = val;}
+static inline unsigned long regs_syscallno(struct pt_regs *regs) {return regs->orig_ax;}
+static inline void set_regs_syscallno(struct pt_regs *regs, unsigned long val) {regs->orig_ax = val;}
+static inline unsigned long regs_first(struct pt_regs *regs) {return regs->bx;}
+static inline unsigned long regs_second(struct pt_regs *regs) {return regs->cx;}
+static inline unsigned long regs_third(struct pt_regs *regs) {return regs->dx;}
+static inline unsigned long regs_fourth(struct pt_regs *regs) {return regs->si;}
+static inline unsigned long regs_fifth(struct pt_regs *regs) {return regs->di;}
+static inline unsigned long regs_sixth(struct pt_regs *regs) {return regs->bp;}
+static inline unsigned long regs_ip(struct pt_regs *regs) {return regs->ip;}
+static inline unsigned long regs_sp(struct pt_regs *regs) {return regs->sp;}
+
+#else
+
+#error "unsupported architecture"
+
+#endif
 
 #include <linux/kfifo.h>
 #include <linux/cond.h>
+#include <linux/semaphore.h>
 
 typedef enum {idle, recording, replaying, done} replay_state_t;
 
@@ -45,8 +98,16 @@ typedef struct replay_sphere {
         int num_threads;
         replay_header_t *header;
         int first_execve;
-} replay_sphere_t;
 
+        // for chunk replay
+        struct semaphore **proc_sem;
+        unsigned char *chunk_buffer;
+        struct kfifo chunk_fifo;
+        cond_t chunk_queue_full_cond;
+        cond_t chunk_next_record_cond;
+        struct chunk_struct *next_chunk;
+        int is_chunk_replay;
+} replay_sphere_t;
 
 typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
@@ -54,13 +115,13 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
 
+        struct chunk_struct *chunk;
 #ifdef CONFIG_MRR
         // TODO: change this later
         char chunk_size_buffer[1024];
 #endif
 } rtcb_t;
 
-void rr_execve(void);
 void rr_syscall_enter(struct pt_regs *regs);
 void rr_syscall_exit(struct pt_regs *regs);
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
@@ -80,15 +141,15 @@ void sphere_inc_fd(replay_sphere_t *sphere);
 void sphere_dec_fd(replay_sphere_t *sphere);
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count);
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
+int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count);
 
 // The first thread to record/replay calls these on itself
-// holds the rr_thread_wait.lock
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
+int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb);
 
 // called from record/replay threads when allocated
 // might be called from context of a different thread
-// holds the rr_thread_wait.lock
 void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs);
 uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs);
 
@@ -96,15 +157,18 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs);
 int sphere_is_recording_replaying(replay_sphere_t *sphere);
 int sphere_is_recording(replay_sphere_t *sphere);
 int sphere_is_replaying(replay_sphere_t *sphere);
+int sphere_is_chunk_replaying(replay_sphere_t *sphere);
 
 // calls from threads that are being recorded/replayed
-// holds the rr_thread_wait.lock
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs);
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs);
 
+// for chunk replay
+void sphere_chunk_begin(struct task_struct *tsk);
+void sphere_chunk_end(struct task_struct *tsk);
 
 #endif
 

@@ -70,6 +70,8 @@
 #endif
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
+#define CHUNK_BUFFER_SIZE (16*1024)
+#define PRINT_DEBUG 0
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -133,28 +135,29 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         return bytesRead;
 }
 
-static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count, 
+                                    struct kfifo *fifo, cond_t *full_cond, cond_t *next_rec_cond) {
         int ret;
         int bytesWritten=0;
         int favail;
         replay_state_t state;
 
-        while(kfifo_is_full(&sphere->fifo))
-                cond_wait(&sphere->queue_full_cond, &sphere->mutex);
+        while(kfifo_is_full(fifo))
+                cond_wait(full_cond, &sphere->mutex);
 
-        if(kfifo_is_full(&sphere->fifo))
+        if(kfifo_is_full(fifo))
                 BUG();
 
         state = atomic_read(&sphere->state);
         BUG_ON((state != replaying) && (state != idle));
         
-        favail = kfifo_avail(&sphere->fifo);
+        favail = kfifo_avail(fifo);
 
         if(favail < count)
                 count = favail;
 
-        ret = kfifo_from_user(&sphere->fifo, buf, count, &bytesWritten);
-        cond_broadcast(&sphere->next_record_cond);
+        ret = kfifo_from_user(fifo, buf, count, &bytesWritten);
+        cond_broadcast(next_rec_cond);
 
         // it might return -EFAULT, which we will pass back
         if(ret)
@@ -253,7 +256,8 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         int len, ret;
 
         // if someone is in the middle of processing a copy to
-        // user buffer, just exit immediately
+        // user buffer, just exit immediately because the data on the fifo
+        // will not be a header, it will be copy to user data
         if(sphere->fifo_head_ctu_buf)
                 return 0;
 
@@ -264,7 +268,7 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
                         memset(sphere->header, 0, sizeof(replay_header_t));
                         ret = kfifo_out(&sphere->fifo, sphere->header, sizeof(replay_header_t));
                         if(ret != sizeof(replay_header_t))
-                                BUG();
+                                BUG();                        
                         cond_broadcast(&sphere->queue_full_cond);
                 }
         }
@@ -284,6 +288,11 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
         if((sphere->header == NULL) || (sphere->header->thread_id != thread_id))
                 BUG();
         header = sphere->header;
+        // make sure to set the ctu_buf value before setting the sphere header back to NULL
+        // this prevents any other threads from accesing the fifo even though the header is
+        // NULL
+        if(header->type == copy_to_user_event)
+                sphere->fifo_head_ctu_buf = 1;
         sphere->header = NULL;
 
         return header;
@@ -322,7 +331,7 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                 if(make_copy) {
                         // this is for an emulated system call, we need to replay
                         // the copy to user calls to emulate it properly
-                        ret = kfifo_to_user(&sphere->fifo, (void __user *) (to_addr+idx), len, 
+                        ret = kfifo_to_user(&sphere->fifo, (void __user *) ((long) (to_addr+idx)), len, 
                                             &bytesWritten);
                         if(ret || (len != bytesWritten)) BUG();
                 } else {
@@ -331,12 +340,12 @@ static void replay_copy_to_user(replay_sphere_t *sphere, int make_copy) {
                         // XXX FIXME we should put something here to check and make 
                         // sure the values are the same
                         for(i = 0; i < len; i++) {
-                                cret = copy_from_user(&ref, (void *) (to_addr+i), sizeof(ref));
+                                cret = copy_from_user(&ref, (void *) ((long) (to_addr+i)), sizeof(ref));
                                 ret = kfifo_out(&sphere->fifo, &c, sizeof(c));
                                 if(ret != sizeof(c)) BUG();
                                 if(c != ref) {
                                         printk(KERN_CRIT "copy_to_user bug at addr %p %d %d %d %d",
-                                               (void *) (to_addr+i), i, c, ref, cret);
+                                               (void *) ((long) (to_addr+i)), i, c, ref, cret);
                                         BUG();
                                 }
                         }
@@ -353,17 +362,20 @@ static int reexecute_syscall(struct pt_regs *regs) {
         // this is for the mmap optimization, for dlls we assume that they exist on the 
         // system that is replaying and that opening an existing file with O_RDONLY will
         // not affect it
-        if(regs->orig_ax == __NR_open)
-                return ((regs->si & O_ACCMODE) == O_RDONLY);
+        if(regs_syscallno(regs) == __NR_open)
+                return ((regs_second(regs) & O_ACCMODE) == O_RDONLY);
 
         // this is used to detect shared memory threads, something we
         // don't handle yet
-        if(regs->orig_ax == __NR_clone)
-                BUG_ON((regs->di & CLONE_VM) == CLONE_VM);
+        if(regs_syscallno(regs) == __NR_clone)
+                BUG_ON((regs_first(regs) & CLONE_VM) == CLONE_VM);
 
-        switch (regs->orig_ax) {
+        switch (regs_syscallno(regs)) {
 
-        case __NR_execve: case __NR_brk: case __NR_arch_prctl:
+#ifdef CONFIG_X86_64
+        case __NR_arch_prctl:
+#endif
+        case __NR_execve: case __NR_brk:
         case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
         case __NR_mprotect: case __NR_exit: case __NR_mlock:
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
@@ -374,12 +386,13 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_sigaltstack:
                 return 1;
 
-        case __NR_shmget: case __NR_shmat: case __NR_shmctl:
-        case __NR_vfork: case __NR_shmdt:
+#ifdef CONFIG_X86_64
+        case __NR_shmget: case __NR_shmat: case __NR_shmctl:  case __NR_shmdt:
+#endif
         case __NR_ptrace: case __NR_modify_ldt: case __NR_reboot: case __NR_iopl:
-        case __NR_ioperm: case __NR_setsid:
+        case __NR_vfork: case __NR_ioperm: case __NR_setsid:
                 // we don't know how to support these yet
-                printk(KERN_CRIT "unhandled syscall %lu\n", regs->orig_ax);
+                printk(KERN_CRIT "unhandled syscall %lu\n", regs_syscallno(regs));
                 BUG();
                 return 1;
 
@@ -398,52 +411,48 @@ static void check_reg(char *reg, unsigned long a, unsigned long b) {
 
 static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         // for now we will just check syscall parameters and a few others
-        check_reg("orig_ax", regs->orig_ax, stored_regs->orig_ax);
-        check_reg("ip", regs->ip, stored_regs->ip);
-        check_reg("sp", regs->sp, stored_regs->sp);
-        check_reg("ax", regs->ax, stored_regs->ax);
-        check_reg("cx", regs->cx, stored_regs->cx);
-        check_reg("dx", regs->dx, stored_regs->dx);
-        check_reg("si", regs->si, stored_regs->si);
-        check_reg("di", regs->di, stored_regs->di);
-        check_reg("r8", regs->r8, stored_regs->r8);
-        check_reg("r9", regs->r9, stored_regs->r9);
-        check_reg("r10", regs->r10, stored_regs->r10);
-        // r11 is used as eflags for sysret/syscall.
-        // it should not be checked here --Nima
-        // check_reg("r11", regs->r11, stored_regs->r11);
+        check_reg("syscallno", regs_syscallno(regs), regs_syscallno(stored_regs));
+        check_reg("ip", regs_ip(regs), regs_ip(stored_regs));
+        check_reg("sp", regs_sp(regs), regs_sp(stored_regs));
+        check_reg("return", regs_return(regs), regs_return(stored_regs));
+        check_reg("first", regs_first(regs), regs_first(stored_regs));
+        check_reg("second", regs_second(regs), regs_second(stored_regs));
+        check_reg("third", regs_third(regs), regs_third(stored_regs));
+        check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
+        check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
+        check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
         BUG_ON(header->type != syscall_exit_event);        
 
-        if(regs->orig_ax == __NR_open) {
+        if(regs_syscallno(regs) == __NR_open) {
                 // we let an open through, fixup the fd
-                if(regs->ax != header->regs.ax) {
-                        if((regs->ax < 0) && (header->regs.ax >= 0)) {
+                if(regs_return(regs) != regs_return(&header->regs)) {
+                        if((regs_return(regs) < 0) && (regs_return(&header->regs) >= 0)) {
                                 // worked during recording, but not during replay, switch to
                                 // replaying this syscall and hope it is not for an mmap
-                        } else if((regs->ax >= 0) && (header->regs.ax < 0)) {
+                        } else if((regs_return(regs) >= 0) && (regs_return(&header->regs) < 0)) {
                                 // failed during recording, but not now, clean up
-                                sys_close(regs->ax);
-                        } else if(regs->ax != header->regs.ax) {
+                                sys_close(regs_return(regs));
+                        } else if(regs_return(regs) != regs_return(&header->regs)) {
                                 // opened, but with different fd, fixup needed
-                                BUG_ON((regs->ax < 0) || (header->regs.ax < 0));
-                                sys_dup2(regs->ax, header->regs.ax);
-                                sys_close(regs->ax);
+                                BUG_ON((regs_return(regs) < 0) || (regs_return(&header->regs) < 0));
+                                sys_dup2(regs_return(regs), regs_return(&header->regs));
+                                sys_close(regs_return(regs));
                         } else {
-                                BUG_ON(regs->ax != header->regs.ax);
+                                BUG_ON(regs_return(regs) != regs_return(&header->regs));
                         }
-                        regs->ax = header->regs.ax;
+                        set_regs_return(regs, regs_return(&header->regs));
                 }
                 check_regs(regs, &header->regs);
-        } else if(header->regs.orig_ax == __NR_close) {
+        } else if(regs_syscallno(&header->regs) == __NR_close) {
                 // this is for our mmap optimzation
-                sys_close(regs->di);
+                sys_close(regs_first(regs));
                 *regs = header->regs;
-        } else if((header->regs.orig_ax == __NR_dup) ||
-                  (header->regs.orig_ax == __NR_dup2) ||
-                  (header->regs.orig_ax == __NR_dup3)) {
+        } else if((regs_syscallno(&header->regs) == __NR_dup) ||
+                  (regs_syscallno(&header->regs) == __NR_dup2) ||
+                  (regs_syscallno(&header->regs) == __NR_dup3)) {
                 // XXX FIXME
                 // we need to re-execute these if one of the
                 // fds is from our previous open
@@ -467,17 +476,17 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
                 if(sphere->first_execve)
                         check_regs(regs, &header->regs);
                 if(!reexecute_syscall(regs))
-                        regs->orig_ax = __NR_getpid;
+                        set_regs_syscallno(regs, __NR_getpid);
         } else if(header->type == syscall_exit_event) {                
                 handle_mmap_optimization(regs, header);
 
                 // fixup the return value for clone, fork, and vfork
-                if((regs->orig_ax == __NR_clone) ||
-                   (regs->orig_ax == __NR_fork) ||
-                   (regs->orig_ax == __NR_vfork))
-                        regs->ax = header->regs.ax;
+                if((regs_syscallno(regs) == __NR_clone) ||
+                   (regs_syscallno(regs) == __NR_fork) ||
+                   (regs_syscallno(regs) == __NR_vfork))
+                        set_regs_return(regs, regs_return(&header->regs));
 
-                if(regs->orig_ax == __NR_getpid) {
+                if(regs_syscallno(regs) == __NR_getpid) {
                         // emulate system call by copying registers
                         *regs = header->regs;
                 } else if(sphere->first_execve) {
@@ -488,9 +497,7 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
 
         } else if(header->type == instruction_event) {
                 // This is only for rdtsc for now, we can probably copy the entire regs struct
-                regs->ax = header->regs.ax;
-                regs->dx = header->regs.dx;
-                regs->ip = header->regs.ip;
+                *regs = header->regs;
         }
 }
 
@@ -500,21 +507,21 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         replay_header_t *header;
         int exit_loop = 0;
 
-        /*
-        printk(KERN_CRIT "thread_id = %u\n", thread_id);
-        if((event == syscall_enter_event) || (event == syscall_exit_event)) {
-                printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs->orig_ax);
-        } else {
-                printk(KERN_CRIT "event %u\n", event);
+        if(PRINT_DEBUG) {
+                printk(KERN_CRIT "thread_id = %u\n", thread_id);
+                if((event == syscall_enter_event) || (event == syscall_exit_event)) {
+                        printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
+                } else {
+                        printk(KERN_CRIT "event %u\n", event);
+                }
         }
-        */
 
         do {
                 header = replay_wait_for_log(sphere, thread_id);
                 if(header == NULL)
                         BUG();
-
-                //printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
+                
+                if(PRINT_DEBUG) printk(KERN_CRIT "thread_id %d got event %d\n", thread_id, header->type);
                 // on emulated system calls we will get a number of copy to user
                 // log entries between the system call enter and exit events
                 // so we loop here on copy to user events until we finally
@@ -528,18 +535,19 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                         // also, we replay copy to user for clone system calls because we re-execute
                         // them but the kernel pushes some pid information into userspace that will
                         // be different whey replaying
-                        replay_copy_to_user(sphere, ((regs->orig_ax == __NR_getpid) || (regs->orig_ax == __NR_clone)) 
+                        replay_copy_to_user(sphere, ((regs_syscallno(regs) == __NR_getpid) || (regs_syscallno(regs) == __NR_clone)) 
                                                     && (event == syscall_exit_event));
+                        if(PRINT_DEBUG) printk("done replaying copy_to_user\n");
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
-                        printk(KERN_CRIT "sending signal %ld\n", header->regs.orig_ax);
-                        current->rtcb->send_sig |= 1 << header->regs.orig_ax;
-                        send_sig(header->regs.orig_ax, current, 1);
+                        printk(KERN_CRIT "sending signal %ld\n", regs_syscallno(&header->regs));
+                        current->rtcb->send_sig |= 1<<regs_syscallno(&header->regs);
+                        send_sig(regs_syscallno(&header->regs), current, 1);
                 } else {
                         exit_loop = 1;
                         if(header->type != event) {
                                 printk(KERN_CRIT "header->type = %u, type = %u, header->orig_ax %lu, regs->orig_ax = %lu\n", 
-                                       header->type, event, header->regs.orig_ax, regs->orig_ax);
+                                       header->type, event, regs_syscallno(&header->regs), regs_syscallno(regs));
                                 BUG();
                         }
                 }
@@ -553,7 +561,74 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
         } while(!exit_loop);
 
-        //printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
+        if(PRINT_DEBUG) printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
+}
+
+static int is_next_chunk(replay_sphere_t *sphere, uint32_t thread_id) {
+        int len, ret;
+
+        if(sphere->next_chunk == NULL) {
+                len = kfifo_len(&sphere->chunk_fifo);
+                if(len >= sizeof(chunk_t)) {
+                        sphere->next_chunk = kmalloc(sizeof(chunk_t), GFP_KERNEL);
+                        ret = kfifo_out(&sphere->chunk_fifo, sphere->next_chunk, sizeof(chunk_t));
+                        if(ret != sizeof(chunk_t))
+                                BUG();
+                        cond_broadcast(&sphere->chunk_queue_full_cond);
+                }
+        }
+
+        if(sphere->next_chunk != NULL)
+                return sphere->next_chunk->thread_id == thread_id;
+
+        return 0;
+        
+}
+
+static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
+        chunk_t *chunk;
+        uint32_t idx, i, me;
+
+        BUG_ON(rtcb->chunk != NULL);
+        while(!is_next_chunk(sphere, rtcb->thread_id))
+                cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
+
+        BUG_ON((sphere->next_chunk == NULL) || (sphere->next_chunk->thread_id != rtcb->thread_id));
+
+        chunk = sphere->next_chunk;
+        sphere->next_chunk = NULL;        
+        
+        me = chunk->processor_id;
+        cond_broadcast(&sphere->chunk_next_record_cond);
+
+        mutex_unlock(&sphere->mutex);
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                for(i = 0; i < chunk->pred_vec[idx]; i++) {
+                        down(&(sphere->proc_sem[idx][me]));
+                }
+        }
+        mutex_lock(&sphere->mutex);
+
+        rtcb->chunk = chunk;
+}
+
+static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
+        chunk_t *chunk;
+        uint32_t idx, i, me;
+
+        chunk = rtcb->chunk;
+        me = chunk->processor_id;
+
+        mutex_unlock(&sphere->mutex);
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                for(i = 0; i < chunk->succ_vec[idx]; i++) {
+                        up(&(sphere->proc_sem[me][idx]));
+                }
+        }
+        mutex_lock(&sphere->mutex);
+
+        rtcb->chunk = NULL;
+        kfree(chunk);
 }
 
 /**********************************************************************************************/
@@ -565,6 +640,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 
 replay_sphere_t *sphere_alloc(void) {
         replay_sphere_t *sphere;
+        int i, j;
         sphere = kmalloc(sizeof(replay_sphere_t), GFP_KERNEL);
         if(sphere == NULL) {
                 BUG();
@@ -582,7 +658,15 @@ replay_sphere_t *sphere_alloc(void) {
                 BUG();
                 return NULL;
         }
-        
+
+        sphere->chunk_buffer = vmalloc(CHUNK_BUFFER_SIZE);
+        if(sphere->chunk_buffer == NULL) {
+                vfree(sphere->fifo_buffer);
+                kfree(sphere);
+                BUG();
+                return NULL;
+        }
+
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         cond_init(&sphere->queue_full_cond);
         cond_init(&sphere->queue_empty_cond);
@@ -590,6 +674,22 @@ replay_sphere_t *sphere_alloc(void) {
         sphere->num_threads = 0;
         atomic_set(&sphere->fd_count, 0);
         sphere->header = NULL;
+
+        kfifo_init(&sphere->chunk_fifo, sphere->chunk_buffer, CHUNK_BUFFER_SIZE);
+        cond_init(&sphere->chunk_queue_full_cond);
+        cond_init(&sphere->chunk_next_record_cond);
+        // XXX FIXME check allocation errors
+        sphere->proc_sem = (struct semaphore **) 
+                kmalloc(NUM_CHUNK_PROC*sizeof(struct semaphore *), GFP_KERNEL);
+        for(i = 0; i < NUM_CHUNK_PROC; i++) {
+                sphere->proc_sem[i] = (struct semaphore *) 
+                        kmalloc(NUM_CHUNK_PROC * sizeof(struct semaphore), GFP_KERNEL);
+                for(j = 0; j < NUM_CHUNK_PROC; j++) {
+                        sema_init(&sphere->proc_sem[i][j], 0);
+                }
+        }
+        sphere->next_chunk = NULL;
+        sphere->is_chunk_replay = 0;
 
         mutex_init(&sphere->mutex);
 
@@ -607,6 +707,10 @@ void sphere_reset(replay_sphere_t *sphere) {
                 printk(KERN_CRIT "Warning, replay sphere fifo still has data....\n");        
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         sphere->fifo_head_ctu_buf = 0;
+        sphere->is_chunk_replay = 0;
+        // XXX FIXME we should do something to reset the proc_sem semaphores
+        // or throw a bug if there are any threads waiting on them or they
+        // have values
         mutex_unlock(&sphere->mutex);
 }
 
@@ -624,6 +728,13 @@ int sphere_is_replaying(replay_sphere_t *sphere) {
         return sphere_is_state(sphere, replaying);
 }
 
+int sphere_is_chunk_replaying(replay_sphere_t *sphere) {
+        // XXX FIXME we probably need to lock here because we are accessing
+        // is_chunk_replay, even though it only gets set at beginning of replay
+        BUG_ON(sphere->is_chunk_replay && !sphere_is_replaying(sphere));
+        return sphere_is_replaying(sphere) && sphere->is_chunk_replay;
+}
+
 void sphere_inc_fd(replay_sphere_t *sphere) {
         atomic_inc(&sphere->fd_count);
 }
@@ -636,7 +747,17 @@ void sphere_dec_fd(replay_sphere_t *sphere) {
 int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
         mutex_lock(&sphere->mutex);
-        ret = sphere_fifo_from_user_ll(sphere, buf, count);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->fifo, 
+                                       &sphere->queue_full_cond, &sphere->next_record_cond);
+        mutex_unlock(&sphere->mutex);
+        return ret;
+}
+
+int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
+        int ret;
+        mutex_lock(&sphere->mutex);
+        ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->chunk_fifo, 
+                                       &sphere->chunk_queue_full_cond, &sphere->chunk_next_record_cond);
         mutex_unlock(&sphere->mutex);
         return ret;
 }
@@ -669,10 +790,25 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
         return ret;
 }
 
+int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
+        int ret = 0;
+
+        mutex_lock(&sphere->mutex);
+        BUG_ON(!sphere_is_replaying(sphere));
+        sphere->is_chunk_replay = 1;
+        rtcb->chunk = NULL;
+        mutex_unlock(&sphere->mutex);
+
+        return ret;
+}
+
 uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
         uint32_t thread_id;
 
         mutex_lock(&sphere->mutex);
+
+        BUG_ON(sphere_is_chunk_replaying(sphere) && sphere->first_execve);
+
         thread_id = sphere_next_thread_id(sphere);
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_create_event, thread_id, regs);
@@ -740,11 +876,34 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
+        int exec;
+
+        BUG_ON(sphere != current->rtcb->sphere);
+
         mutex_lock(&sphere->mutex);
+        exec = sphere->first_execve;
         replay_event_locked(sphere, event, thread_id, regs);
+        // this should only happen on the exit of the first execve in the first
+        // thread that executes execve, gets chunking started        
+        if(sphere_is_chunk_replaying(sphere) && (exec != sphere->first_execve)) {
+                BUG_ON(exec);                
+                sphere_chunk_begin_locked(sphere, current->rtcb);
+        }
         mutex_unlock(&sphere->mutex);
 }
 
+void sphere_chunk_begin(struct task_struct *tsk) {
+        replay_sphere_t *sphere = tsk->rtcb->sphere;
+        mutex_lock(&sphere->mutex);
+        sphere_chunk_begin_locked(sphere, tsk->rtcb);
+        mutex_unlock(&sphere->mutex);
+}
+void sphere_chunk_end(struct task_struct *tsk) {
+        replay_sphere_t *sphere = tsk->rtcb->sphere;
+        mutex_lock(&sphere->mutex);
+        sphere_chunk_end_locked(sphere, tsk->rtcb);
+        mutex_unlock(&sphere->mutex);
+}
 
 
 /**********************************************************************************************/
