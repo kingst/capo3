@@ -42,55 +42,48 @@
 **========================================================== 
 */
 
-#include <iostream>
-
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <fcntl.h>
+#include <unistd.h>
 #include <assert.h>
-#include <string.h>
 
 #include "util.h"
 
-using namespace std;
-
-
 int main(void) {
-    unsigned char buf[4096];
-    int replayFd, ret, bytesWritten, status, len;
-    replay_header_t header;
-    struct execve_data *e;
-
-    replayFd = open("/dev/replay0", O_WRONLY | O_CLOEXEC);
-    if(replayFd < 0) {
-        cerr << "could not open /dev/replay device" << endl;
-        return 1;
-    }
-    ret = ioctl(replayFd, REPLAY_IOC_RESET_SPHERE, 0);
-    assert(ret == 0);
-
-    ret = read(STDIN_FILENO, &header, sizeof(header));
-    assert(ret == sizeof(header));
-    
-    e = readExecveData();
-    startChild(replayFd, e->argv, e->envp, 0);
-
-    while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
-        bytesWritten = 0;
-        len = ret;
-        while(bytesWritten < len) {
-            ret = write(replayFd, buf+bytesWritten, len-bytesWritten);
-            assert(ret > 0);
-            bytesWritten += ret;
+        replay_header_t header;
+        int ret;
+        struct execve_data *e;
+        
+        while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
+                assert(ret == sizeof(header));
+                printf("%u ", header.thread_id);
+                if(header.type == syscall_enter_event) {
+                        printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx\n",
+                               header.regs.orig_rax, header.regs.rdi);
+                } else if(header.type == syscall_exit_event) {
+                        printf("syscall_exit_event, syscall = %ld ret = %ld\n",
+                               header.regs.orig_rax, header.regs.rax);
+                } else if(header.type == thread_create_event) {
+                        printf("thread_create_event\n");
+                } else if(header.type == thread_exit_event) {
+                        printf("thread_exit_event\n");
+                } else if(header.type == instruction_event) {
+                        printf("instruction_event\n");
+                } else if(header.type == execve_event) {
+                        printf("execve_event\n");
+                        e = readExecveData();
+                } else if(header.type == copy_to_user_event) {
+                        printf("copy_to_user\n");
+                        readBuffer();
+                } else if(header.type == signal_event) {
+                        printf("signal\n");
+                } else {
+                        assert(0);
+                }
+                
         }
-    }
-
-    while(wait(&status) != -1)
-        ;
-
-    return 0;
+        
+        assert(ret == 0);
+        
+        return 0;
 }
