@@ -2,6 +2,8 @@
 #include <linux/ptrace.h>
 #include <linux/kfifo.h>
 #include <asm/replay.h>
+
+#include <asm/mrr/simics_if.h>
 #include "mrr_if.h"
 
 #define MSG_PREFIX "KernelMrr: "
@@ -43,17 +45,32 @@ void mrr_buffer_full_handler(struct task_struct *tsk, bool complete_flush) {
  */
 void mrr_chunk_done_handler(struct task_struct *tsk) {
 
-    if (NULL == tsk->rtcb) {
+    rtcb_t *rtcb = tsk->rtcb;
+    if (NULL == rtcb) {
         printk(KERN_ERR MSG_PREFIX "mrr_chunk_done_handler invoked on invalid RTCB.");
         BUG();
     }
 
     // this should be during replay
     if (sphere_is_replaying(tsk->rtcb->sphere)) {
+
+        // we might sleep, so enable irqs
+		local_irq_enable();
+
         // for debugging: print a message and break
         my_magic_message("in chunk done handler.");
         my_sim_break();
+
+        // signal the end of the current chunk
+        if (NULL != rtcb->chunk)
+            sphere_chunk_end(current);
+
+        // set the next target chunk size
+        sphere_chunk_begin(current);
+        if (NULL == rtcb->chunk) BUG();
+        mrr_set_chunk_size(rtcb->chunk->inst_count);
     }
+
 }
 
 

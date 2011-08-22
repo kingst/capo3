@@ -3,11 +3,11 @@
 
 #define REPLAY_IOC_MAGIC 0xf1
 
-#define REPLAY_IOC_START_RECORDING   _IO(REPLAY_IOC_MAGIC, 0)
-#define REPLAY_IOC_START_REPLAYING   _IO(REPLAY_IOC_MAGIC, 1)
-#define REPLAY_IOC_RESET_SPHERE      _IO(REPLAY_IOC_MAGIC, 2)
-#define REPLAY_IOC_START_CHUNKING    _IO(REPLAY_IOC_MAGIC, 3)
-#define REPLAY_IOC_SET_CHUNK_LOG_FD  _IO(REPLAY_IOC_MAGIC, 4)
+#define REPLAY_IOC_START_RECORDING              _IO(REPLAY_IOC_MAGIC, 0)
+#define REPLAY_IOC_START_REPLAYING              _IO(REPLAY_IOC_MAGIC, 1)
+#define REPLAY_IOC_RESET_SPHERE                 _IO(REPLAY_IOC_MAGIC, 2)
+#define REPLAY_IOC_START_CHUNKING               _IO(REPLAY_IOC_MAGIC, 3)
+#define REPLAY_IOC_SET_CHUNK_LOG_FD             _IO(REPLAY_IOC_MAGIC, 4)
 
 typedef enum {invalid_event=0, execve_event, syscall_enter_event, 
               syscall_exit_event, thread_create_event, thread_exit_event,
@@ -28,6 +28,7 @@ typedef struct chunk_struct {
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
+        uint32_t my_ticket;
 } chunk_t;
 
 #ifdef __KERNEL__
@@ -100,6 +101,10 @@ typedef struct replay_sphere {
         int first_execve;
 
         // for chunk replay
+        int *next_tickets;
+        atomic_t *cur_tickets;
+        wait_queue_head_t tickets_wait_queue;
+        cond_t cur_tickets_updated;
         struct semaphore **proc_sem;
         unsigned char *chunk_buffer;
         struct kfifo chunk_fifo;

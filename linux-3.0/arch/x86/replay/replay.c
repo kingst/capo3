@@ -518,7 +518,10 @@ void rr_thread_exit(struct pt_regs *regs) {
         sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
         current->rtcb = NULL;
 
-        BUG_ON(rtcb->chunk != NULL);
+        // The very last chunk of the processor will not be
+        // released since chunk done exception will be only 
+        // activated after chunking has been enabled. --Nima
+        //BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }
