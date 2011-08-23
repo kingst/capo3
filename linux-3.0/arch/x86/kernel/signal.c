@@ -876,27 +876,18 @@ do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
 #ifdef CONFIG_X86_32
 	clear_thread_flag(TIF_IRET);
 #endif /* CONFIG_X86_32 */
-        /*
-        printk(KERN_INFO
-                        "c: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx\n",
-                        current->comm, current->pid,
-                        regs->ip, regs->sp, regs->flags);
-                        */
 
 #ifdef CONFIG_RECORD_REPLAY 
-        if(
-                        test_tsk_thread_flag(current, TIF_RECORD_REPLAY) 
-                        && sphere_is_replaying(current->rtcb->sphere)
-          ){
-                printk(KERN_INFO 
-                        "do_notify_resume: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx thread_info->flags:0x%08lx \n",
-                        current->comm, current->pid, regs->ip, regs->sp, regs->flags, thread_info_flags);
-                if (thread_info_flags & _TIF_RR_SINGLE_STEP){
-                        regs->flags |= X86_EFLAGS_TF;
-                }
-                if(i>10)
-                        panic("Done");
-                i++;
+        if(test_tsk_thread_flag(current, TIF_RECORD_REPLAY) &&
+                        sphere_is_replaying(current->rtcb->sphere) &&
+                        (thread_info_flags & _TIF_RR_SINGLE_STEP)){
+                /*
+                   printk(KERN_INFO 
+                   "do_notify_resume: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx thread_info->flags:0x%08lx \n",
+                   current->comm, current->pid, regs->ip, regs->sp, regs->flags, thread_info_flags);
+                   */
+                rr_set_single_step(current);
+                clear_tsk_thread_flag(current, TIF_RR_SINGLE_STEP);
         }
 #endif
 

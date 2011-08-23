@@ -324,7 +324,6 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(sphere_is_recording(rtcb->sphere)) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         } else {
-                printk(KERN_CRIT"From syscall_enter");
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
         
@@ -393,7 +392,6 @@ void rr_syscall_exit(struct pt_regs *regs) {
                 }
         } else {
                 if(rtcb->send_sig == 0){
-                        printk(KERN_CRIT"From syscall exit");
                         replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 }
         }
@@ -525,29 +523,13 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
 }
 
 void rr_set_single_step(struct task_struct *tsk){
-        //void rr_set_single_step(struct pt_regs *regs){
         struct pt_regs *regs = task_pt_regs(tsk);
-        char * ls = "replay";
 
-        // this function is imported from ptrace.h but defined in step.c 
-        //if(test_tsk_thread_flag(next, TIF_RECORD_REPLAY)){
-        //if(sphere_is_replaying(tsk->rtcb->sphere)){
-
-        /*
-           if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY))
-           printk(KERN_CRIT "tsk->comm: %s, ls: %s compare: %d\n",
-           tsk->comm, ls, strcmp(tsk->comm,ls));
-         */
-
-        if(sphere_is_replaying(tsk->rtcb->sphere) && ((strcmp(tsk->comm,ls) != 0))){
-                //if((strcmp(tsk->comm,ls) != 0)){ 
-                //if((strcmp(tsk->comm,ls) == 0) || test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){ 
+        if(sphere_is_replaying(tsk->rtcb->sphere)){
                 regs->flags |= X86_EFLAGS_TF;
-                //set_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP);
-                set_ti_thread_flag(task_thread_info(tsk), TIF_RR_SINGLE_STEP);
-                printk(KERN_INFO 
-                                "rr_set_single_step: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
-                                tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
+                //printk(KERN_INFO 
+                //      "rr_set_single_step: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
+                //       tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
         }
 }
 

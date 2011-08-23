@@ -585,45 +585,20 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 
 #ifdef CONFIG_RECORD_REPLAY
         /* 
-         * This code will detect if we are currently replaying a process. If so it
-         * will enforce memory interleaving, and handle resetting the single
+         * Single stepping during the replay of a process. If replaying it will
+         * enforces memory interleaving, and handle resetting the single
          * stepping functionality so that we do not go past the end of a chunk.
          */
-        //char * ls = "for";
-        //if(1 && (test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) ||
-                        //(strcmp(tsk->comm,ls) == 0))){
-        if(             
-                test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) 
-                && sphere_is_replaying(tsk->rtcb->sphere) 
-                //&& test_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP)
-          ){
-                //if(!test_tsk_thread_flag(tsk,TIF_RR_SINGLE_STEP))
-                if(!user_mode(regs))
-                        printk(KERN_CRIT "do_debug: got into do debug from kernel.");
-
-
-        //if(user_mode(regs) && strcmp(tsk->comm,ls) == 0){
-        //if(user_mode(regs)){ 
-                //printk(KERN_CRIT "In Traps and handling reset of single step\n");
-
-                //regs->flags |= X86_EFLAGS_TF;
-                set_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP);
-                
-                //tsk->thread.debugreg6 |= DR_STEP;
-                //tsk->thread.debugreg6 |= DR_TRAP1;
-                
-                //si_code = get_si_code(tsk->thread.debugreg6);
-                //send_sigtrap(tsk, regs, error_code, si_code);
-
-                if(test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){
-                        tsk->rtcb->numInst++;
-                        printk(KERN_CRIT "The current instruction is: %llu\n",
-                                        tsk->rtcb->numInst++);
-                }
-                printk(KERN_INFO 
-                        "do_debug: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
-                        tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
-
+        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) &&
+                        sphere_is_replaying(tsk->rtcb->sphere) ){
+                tsk->rtcb->numInst++;  // Just a DEBUG counter TODO remove later
+                /*
+                   printk(KERN_CRIT "The current instruction is: %llu\n",
+                   tsk->rtcb->numInst++);
+                   printk(KERN_INFO 
+                                "do_debug: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
+                                tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
+                 */
                 preempt_conditional_cli(regs);
                 return;
         }

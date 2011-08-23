@@ -787,7 +787,6 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_create_event, thread_id, regs);
         } else {
-                printk(KERN_CRIT"NDD:: From sphere_thread_create");
                 replay_event_locked(sphere, thread_create_event, thread_id, regs);
         }
         mutex_unlock(&sphere->mutex);
@@ -801,7 +800,6 @@ void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_r
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_exit_event, thread_id, regs);
         } else {
-                printk(KERN_CRIT"NDD:: From sphere_thread_exit");
                 replay_event_locked(sphere, thread_exit_event, thread_id, regs);
         }
 
@@ -858,7 +856,6 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
 
         mutex_lock(&sphere->mutex);
         exec = sphere->replay_first_execve;
-        printk(KERN_CRIT"NDD::From replay event");
         replay_event_locked(sphere, event, thread_id, regs);
         // this should only happen on the exit of the first execve in the first
         // thread that executes execve, gets chunking started        
