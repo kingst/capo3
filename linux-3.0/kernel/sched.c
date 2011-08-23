@@ -4318,11 +4318,7 @@ need_resched:
 		rq->nr_switches++;
 		rq->curr = next;
 		++*switch_count;
-#ifdef CONFIG_RECORD_REPLAY
-                if(test_tsk_thread_flag(next, TIF_RECORD_REPLAY)){
-                        rr_set_single_step(next);
-                }
-#endif
+
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
 		 * The context switch have flipped the stack from under us
@@ -4336,6 +4332,12 @@ need_resched:
 		raw_spin_unlock_irq(&rq->lock);
 
 	post_schedule(rq);
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(current, TIF_RECORD_REPLAY)){
+                rr_set_single_step(current);
+        }
+#endif
 
 	preempt_enable_no_resched();
 	if (need_resched())

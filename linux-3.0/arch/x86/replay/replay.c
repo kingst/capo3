@@ -482,11 +482,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         if(tsk->rtcb != NULL)
                 BUG();
 
-        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
-        if(current == tsk)
-                disable_TSC();
-        set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
-
         rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
         memset(rtcb, 0, sizeof(rtcb_t));
 
@@ -496,7 +491,17 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->send_sig = 0;
         rtcb->numInst = 0; /* TODO get rid of this for later */
         rtcb->chunk = NULL;
+
         tsk->rtcb = rtcb;
+        if(current == tsk)
+                disable_TSC();
+        set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
+
+        // it is important that this call comes at the end because the thread
+        // can be scheduled out on the sphere_thread_create call, which
+        // causes problems on the return path to schedule that checks
+        // for this flag being set before calling single step code
+        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
@@ -524,6 +529,10 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
 
 void rr_set_single_step(struct task_struct *tsk){
         struct pt_regs *regs = task_pt_regs(tsk);
+
+        BUG_ON(tsk->rtcb == NULL);
+        BUG_ON(tsk->rtcb->sphere == NULL);
+        BUG_ON(regs == NULL);
 
         if(sphere_is_replaying(tsk->rtcb->sphere)){
                 regs->flags |= X86_EFLAGS_TF;
