@@ -100,6 +100,9 @@ struct thread_info {
 #define TIF_BLOCKSTEP		25	/* set when we want DEBUGCTLMSR_BTF */
 #define TIF_LAZY_MMU_UPDATES	27	/* task is updating the mmu lazily */
 #define TIF_SYSCALL_TRACEPOINT	28	/* syscall tracepoint instrumentation */
+#ifdef CONFIG_RECORD_REPLAY
+#define TIF_RR_SINGLE_STEP      30
+#endif
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
@@ -114,6 +117,7 @@ struct thread_info {
 #define _TIF_USER_RETURN_NOTIFY	(1 << TIF_USER_RETURN_NOTIFY)
 #ifdef CONFIG_RECORD_REPLAY
 #define _TIF_RECORD_REPLAY      (1 << TIF_RECORD_REPLAY)
+#define _TIF_RR_SINGLE_STEP     (1 << TIF_RR_SINGLE_STEP)
 #endif
 #define _TIF_NOTSC		(1 << TIF_NOTSC)
 #define _TIF_IA32		(1 << TIF_IA32)

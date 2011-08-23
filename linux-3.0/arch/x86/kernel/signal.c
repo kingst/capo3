@@ -751,12 +751,6 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 	tracehook_signal_handler(sig, info, ka, regs,
 				 test_thread_flag(TIF_SINGLESTEP));
 
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_tsk_thread_flag(next, TIF_RECORD_REPLAY)){
-                rr_set_single_step(next);
-        }
-#endif
-
 	return 0;
 }
 
@@ -842,15 +836,24 @@ static void do_signal(struct pt_regs *regs)
 		current_thread_info()->status &= ~TS_RESTORE_SIGMASK;
 		sigprocmask(SIG_SETMASK, &current->saved_sigmask, NULL);
 	}
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(current, TIF_RECORD_REPLAY)){
+                //rr_set_single_step(current);
+        }
+#endif
+
 }
 
 /*
  * notification of userspace execution resumption
  * - triggered by the TIF_WORK_MASK flags
  */
+int i = 0;
 void
 do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
 {
+
 #ifdef CONFIG_X86_MCE
 	/* notify userspace of pending MCEs */
 	if (thread_info_flags & _TIF_MCE_NOTIFY)
@@ -879,6 +882,24 @@ do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
                         current->comm, current->pid,
                         regs->ip, regs->sp, regs->flags);
                         */
+
+#ifdef CONFIG_RECORD_REPLAY 
+        if(
+                        test_tsk_thread_flag(current, TIF_RECORD_REPLAY) 
+                        && sphere_is_replaying(current->rtcb->sphere)
+          ){
+                printk(KERN_INFO 
+                        "do_notify_resume: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx thread_info->flags:0x%08lx \n",
+                        current->comm, current->pid, regs->ip, regs->sp, regs->flags, thread_info_flags);
+                if (thread_info_flags & _TIF_RR_SINGLE_STEP){
+                        regs->flags |= X86_EFLAGS_TF;
+                }
+                if(i>10)
+                        panic("Done");
+                i++;
+        }
+#endif
+
 }
 
 void signal_fault(struct pt_regs *regs, void __user *frame, char *where)

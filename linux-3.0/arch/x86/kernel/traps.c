@@ -589,46 +589,41 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
          * will enforce memory interleaving, and handle resetting the single
          * stepping functionality so that we do not go past the end of a chunk.
          */
-
-        /* TODO
-         * I'm not sure right now if this is the exact place to put this code. It
-         * might need to be inserted prior to some of the code above so that it
-         * short circuits the normal handling, but I haven't verified this yet. So
-         * be cognizant that unexpected bahvior is occurring to look in this
-         * direction. 
-         */
-        char * ls = "for";
+        //char * ls = "for";
         //if(1 && (test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) ||
                         //(strcmp(tsk->comm,ls) == 0))){
-        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) &&
-                        sphere_is_replaying(tsk->rtcb->sphere)){
+        if(             
+                test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) 
+                && sphere_is_replaying(tsk->rtcb->sphere) 
+                //&& test_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP)
+          ){
+                //if(!test_tsk_thread_flag(tsk,TIF_RR_SINGLE_STEP))
+                if(!user_mode(regs))
+                        printk(KERN_CRIT "do_debug: got into do debug from kernel.");
+
 
         //if(user_mode(regs) && strcmp(tsk->comm,ls) == 0){
         //if(user_mode(regs)){ 
                 //printk(KERN_CRIT "In Traps and handling reset of single step\n");
-                //set_tsk_thread_flag(current, TIF_SYSCALL_TRACE);
-                //clear_tsk_thread_flag(current, TIF_SYSCALL_EMU);
-                
-                //user_enable_single_step(tsk);
 
-                regs->flags |= X86_EFLAGS_TF;
+                //regs->flags |= X86_EFLAGS_TF;
+                set_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP);
+                
                 //tsk->thread.debugreg6 |= DR_STEP;
                 //tsk->thread.debugreg6 |= DR_TRAP1;
-                //set_tsk_thread_flag(current, TIF_FORCED_TF);
-                //set_tsk_thread_flag(current, TIF_SINGLESTEP);
-                //set_tsk_thread_flag(current, TIF_SYSCALL_TRACE);
+                
+                //si_code = get_si_code(tsk->thread.debugreg6);
+                //send_sigtrap(tsk, regs, error_code, si_code);
 
                 if(test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){
                         tsk->rtcb->numInst++;
                         printk(KERN_CRIT "The current instruction is: %llu\n",
                                         tsk->rtcb->numInst++);
                 }
-                /*
-                printk(KERN_INFO
-                                "a: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx\n",
-                                tsk->comm, tsk->pid,
-                                regs->ip, regs->sp, regs->flags);
-                                */
+                printk(KERN_INFO 
+                        "do_debug: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
+                        tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
+
                 preempt_conditional_cli(regs);
                 return;
         }

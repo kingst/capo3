@@ -324,10 +324,11 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(sphere_is_recording(rtcb->sphere)) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         } else {
+                printk(KERN_CRIT"From syscall_enter");
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
         
-        rr_set_single_step(regs);
+        rr_set_single_step(current);
 }
 
 /*
@@ -350,7 +351,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
         sanity_check();
 
         rtcb = current->rtcb;
-
+        
         // This will skip syscall_exit calls in two situations.  First, when the
         // kernel restarts a system call (as a result of a signal).  Second, on 
         // an sigreturn system call.  Because we re-execute the sigreturn
@@ -391,11 +392,13 @@ void rr_syscall_exit(struct pt_regs *regs) {
                         record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
                 }
         } else {
-                if(rtcb->send_sig == 0)
+                if(rtcb->send_sig == 0){
+                        printk(KERN_CRIT"From syscall exit");
                         replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                }
         }
 
-        rr_set_single_step(regs);
+        rr_set_single_step(current);
 }
 
 void rr_send_signal(int signo) {
@@ -521,48 +524,30 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
         //rr_set_single_step(next_p);
 }
 
-//void rr_set_single_step(struct task_struct *tsk){
-void rr_set_single_step(struct pt_regs *regs){
-        //struct pt_regs *regs = task_pt_regs(tsk);
-        //char * ls = "for";
+void rr_set_single_step(struct task_struct *tsk){
+        //void rr_set_single_step(struct pt_regs *regs){
+        struct pt_regs *regs = task_pt_regs(tsk);
+        char * ls = "replay";
+
         // this function is imported from ptrace.h but defined in step.c 
         //if(test_tsk_thread_flag(next, TIF_RECORD_REPLAY)){
-        //if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) && 
-                        //sphere_is_replaying(tsk->rtcb->sphere)){
+        //if(sphere_is_replaying(tsk->rtcb->sphere)){
 
         /*
-        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY))
-                printk(KERN_CRIT "tsk->comm: %s, ls: %s compare: %d\n",
-                                tsk->comm, ls, strcmp(tsk->comm,ls));
-                                */
+           if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY))
+           printk(KERN_CRIT "tsk->comm: %s, ls: %s compare: %d\n",
+           tsk->comm, ls, strcmp(tsk->comm,ls));
+         */
 
-        if(sphere_is_replaying(tsk->rtcb->sphere)){
-        //if(user_mode(regs) && (strcmp(tsk->comm,ls) == 0)){ 
-        //if((strcmp(tsk->comm,ls) == 0) || test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){ 
-                printk(KERN_INFO
-                                "z: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx\n",
-                                tsk->comm, tsk->pid,
-                                regs->ip, regs->sp, regs->flags);
-                //user_enable_single_step(tsk);
-                //void *stack_top = (void *)tsk->thread.sp0;
-                //struct pt_regs *regs = stack_top - sizeof(struct pt_regs);
-                //
-                //printk(KERN_CRIT "We are in set_single_step and replaying\n");
-
+        if(sphere_is_replaying(tsk->rtcb->sphere) && ((strcmp(tsk->comm,ls) != 0))){
+                //if((strcmp(tsk->comm,ls) != 0)){ 
+                //if((strcmp(tsk->comm,ls) == 0) || test_tsk_thread_flag(tsk,TIF_RECORD_REPLAY)){ 
                 regs->flags |= X86_EFLAGS_TF;
-                //set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
-
-                /*
-		unsigned long debugctl = get_debugctlmsr();
-		debugctl &= ~DEBUGCTLMSR_BTF;
-		update_debugctlmsr(debugctl);
-
-		clear_tsk_thread_flag(tsk, TIF_BLOCKSTEP);
-                */
-                //set_tsk_thread_flag(tsk, TIF_FORCED_TF);
-                //set_tsk_thread_flag(tsk, TIF_SINGLESTEP);
-                //set_tsk_thread_flag(tsk, TIF_SYSCALL_TRACE);
-		//clear_tsk_thread_flag(tsk, TIF_BLOCKSTEP);
+                //set_tsk_thread_flag(tsk, TIF_RR_SINGLE_STEP);
+                set_ti_thread_flag(task_thread_info(tsk), TIF_RR_SINGLE_STEP);
+                printk(KERN_INFO 
+                                "rr_set_single_step: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
+                                tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
         }
 }
 
@@ -588,6 +573,7 @@ int rr_general_protection(struct pt_regs *regs) {
                 
                 record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
         } else {
+                printk(KERN_CRIT"From general protection");
                 replay_event(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
         }
 

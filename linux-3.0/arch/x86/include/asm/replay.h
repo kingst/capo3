@@ -127,8 +127,8 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);
 int rr_deliver_signal(int signr, struct pt_regs *regs);
-//void rr_set_single_step(struct task_strct);
-void rr_set_single_step(struct pt_regs *regs);
+void rr_set_single_step(struct task_struct *tsk);
+//void rr_set_single_step(struct pt_regs *regs);
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt
