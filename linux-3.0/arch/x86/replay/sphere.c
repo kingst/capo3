@@ -852,8 +852,23 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                   struct pt_regs *regs) {
         int exec;
 
+        /*
         BUG_ON(sphere != current->rtcb->sphere);
+        {
+                unsigned long flags;
+                raw_local_irq_save(flags);
+                if(irqs_disabled_flags(flags)) {
+                        BUG_ON(current->hardirqs_enabled);
+                        BUG();
+                } else {
+                        BUG_ON(!current->hardirqs_enabled);
+                }
+        }
+        */
 
+        /*
+	printk(KERN_CRIT "replay event enter: instruction count: %d\n eip:0x%lx", current->rtcb->numInst, regs->ip);
+        */
         mutex_lock(&sphere->mutex);
         exec = sphere->replay_first_execve;
         replay_event_locked(sphere, event, thread_id, regs);
@@ -864,6 +879,9 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 sphere_chunk_begin_locked(sphere, current->rtcb);
         }
         mutex_unlock(&sphere->mutex);
+        /*
+	printk(KERN_CRIT "replay event exit: instruction count: %d\n eip:0x%lx", current->rtcb->numInst, regs->ip);
+        */
 }
 
 void sphere_chunk_begin(struct task_struct *tsk) {

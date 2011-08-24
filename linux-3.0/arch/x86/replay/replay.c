@@ -326,8 +326,6 @@ void rr_syscall_enter(struct pt_regs *regs) {
         } else {
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         }
-        
-        rr_set_single_step(current);
 }
 
 /*
@@ -512,11 +510,9 @@ void rr_thread_exit(struct pt_regs *regs) {
         printk(KERN_CRIT "Thread exiting: Total Instruction: %llu\n",
                         rtcb->numInst);
 
-        current->rtcb = NULL;
-        clear_thread_flag(TIF_RECORD_REPLAY);
-
         sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
         current->rtcb = NULL;
+        clear_thread_flag(TIF_RECORD_REPLAY);
 
         BUG_ON(rtcb->chunk != NULL);
 
@@ -539,6 +535,7 @@ void rr_set_single_step(struct task_struct *tsk){
                 //printk(KERN_INFO 
                 //      "rr_set_single_step: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
                 //       tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
+
         }
 }
 
