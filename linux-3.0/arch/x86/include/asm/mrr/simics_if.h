@@ -88,7 +88,7 @@ inline static void *my_magic_3(void *a, void *c, void *d) {
 
 #define my_magic(n) my_magic_1(n)
 #define my_sim_break()                  my_magic((void*)MRR_MARKER_BREAK_SIM)
-#define my_magic_message(msg)           my_magic_2((void*)MRR_MARKER_MESSAGE,msg)
-#define my_magic_message_int(msg,arg)   my_magic_3((void*)MRR_MARKER_MESSAGE_INT,msg,arg)
+#define my_magic_message(msg)           my_magic_2((void*)MRR_MARKER_MESSAGE,(void*)(msg))
+#define my_magic_message_int(msg,arg)   my_magic_3((void*)MRR_MARKER_MESSAGE_INT,(void*)(msg),(void*)(arg))
 
 #endif /* _ASM_X86_SIMICS_IF_H */

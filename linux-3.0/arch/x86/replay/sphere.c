@@ -207,13 +207,7 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
 
         // is this the first time we see execve in the sphere?
         if((syscall_exit_event == event) && (__NR_execve == regs->orig_ax)) {
-                if (!sphere->first_execve) {
-                    my_magic_message("recording the first execve");
-                }
                 sphere->first_execve = 1;
-        #ifdef CONFIG_MRR
-                prepare_mrr(current);
-        #endif
         }
 
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
@@ -365,11 +359,6 @@ static int reexecute_syscall(struct pt_regs *regs) {
         if(regs_syscallno(regs) == __NR_open)
                 return ((regs_second(regs) & O_ACCMODE) == O_RDONLY);
 
-        // this is used to detect shared memory threads, something we
-        // don't handle yet
-        if(regs_syscallno(regs) == __NR_clone)
-                BUG_ON((regs_first(regs) & CLONE_VM) == CLONE_VM);
-
         switch (regs_syscallno(regs)) {
 
 #ifdef CONFIG_X86_64
@@ -463,13 +452,7 @@ static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event,
                                 struct pt_regs *regs, replay_header_t *header) {
 
         if((header->type == syscall_exit_event) && (header->regs.orig_ax == __NR_execve)) {
-                if (!sphere->first_execve) {
-                    my_magic_message("replaying the first execve");
-                }
                 sphere->first_execve = 1;
-        #ifdef CONFIG_MRR
-                prepare_mrr(current);
-        #endif
         }
 
         if(header->type == syscall_enter_event) {
@@ -589,47 +572,55 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
+        rtcb->is_in_chunk_begin = 1;
         BUG_ON(rtcb->chunk != NULL);
-        while(!is_next_chunk(sphere, rtcb->thread_id))
-                cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
 
+        my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
+        while(!is_next_chunk(sphere, rtcb->thread_id)) {
+                my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
+                cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
+        }
+        my_magic_message_int("got the next chunk entry", rtcb->thread_id);        
+        my_magic_message_int("next chunk entry size:", sphere->next_chunk->inst_count);        
         BUG_ON((sphere->next_chunk == NULL) || (sphere->next_chunk->thread_id != rtcb->thread_id));
 
         chunk = sphere->next_chunk;
-        sphere->next_chunk = NULL;        
+        sphere->next_chunk = NULL;
+        rtcb->chunk = chunk;
         me = chunk->processor_id;
         
         // we should make sure that chunks from the 
         // same recorded cpu execute in the order 
         // that they show up in the chunks log.
         // to enforce this, we use a simple ticketing mechanism
-        chunk->my_ticket = sphere->next_tickets[me];
+        my_magic_message_int("getting my ticket", rtcb->thread_id);        
+        rtcb->my_ticket = sphere->next_tickets[me];
         sphere->next_tickets[me] += 1;
 
         mutex_unlock(&sphere->mutex);
+        cond_broadcast(&sphere->chunk_next_record_cond);
 
         // wait until I see my ticket
-        while(atomic_read(&sphere->cur_tickets[me]) != chunk->my_ticket)
-                wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) != chunk->my_ticket));
-        if (atomic_read(&sphere->cur_tickets[me]) != chunk->my_ticket) 
+        my_magic_message_int("waiting for my ticket", rtcb->thread_id);        
+        while(atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket)
+                wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) == rtcb->my_ticket));
+        if (atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket) 
                 BUG();
 
-        // FIXME I think this a bug --Nima
-        //cond_broadcast(&sphere->chunk_next_record_cond);
-
         // now wait until I see enough tokens from predecessors
+        my_magic_message_int("before semaphores", rtcb->thread_id);        
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
                 for(i = 0; i < chunk->pred_vec[idx]; i++) {
                         down(&(sphere->proc_sem[idx][me]));
                 }
         }
+        my_magic_message_int("after semaphores", rtcb->thread_id);        
 
-        // FIXME I think this is not necessary --Nima
         mutex_lock(&sphere->mutex);
-
-        rtcb->chunk = chunk;
+        rtcb->is_in_chunk_begin = 0;
 }
 
+/*
 static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
@@ -652,6 +643,7 @@ static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         rtcb->chunk = NULL;
         kfree(chunk);
 }
+*/
 
 /**********************************************************************************************/
 
@@ -866,7 +858,9 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
 }
 
 void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs) {
+
         mutex_lock(&sphere->mutex);
+
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_exit_event, thread_id, regs);
         } else {
@@ -887,17 +881,33 @@ void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_r
 void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                    struct pt_regs *regs) {
         int ret = 0;
+        int exec; 
         int should_record = 0;
+        int start_mrr = 0;
 
         mutex_lock(&sphere->mutex);
         should_record = (sphere->first_execve) || (__NR_execve == regs->orig_ax);
         if (should_record) {
+            exec = sphere->first_execve;
             ret = record_header_locked(sphere, event, thread_id, regs);
+            // this should only happen on the exit of the first execve in the first
+            // thread that executes execve, gets chunking started        
+            // FIXME test chunking for recording here
+            if(exec != sphere->first_execve) {
+                    my_magic_message("first execve executed.");
+                    start_mrr = 1;
+                    BUG_ON(exec);
+            }
         }
         mutex_unlock(&sphere->mutex);
 
-        if(ret)
-                BUG();
+#ifdef CONFIG_MRR
+        if (start_mrr) {
+                prepare_mrr(current);
+        }
+#endif
+
+        if(ret) BUG();
 }
 
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len) {
@@ -926,6 +936,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                   struct pt_regs *regs) {
         int exec;
         int should_replay = 0;
+        int start_mrr = 0;
 
         BUG_ON(sphere != current->rtcb->sphere);
 
@@ -938,17 +949,22 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
             // this should only happen on the exit of the first execve in the first
             // thread that executes execve, gets chunking started        
             if(sphere_is_chunk_replaying(sphere) && (exec != sphere->first_execve)) {
-                    my_magic_message("first execve executed. setting the first chunk size");
-                    BUG_ON(exec);                
+                    my_magic_message("first execve executed. getting the first chunk from log.");
+                    BUG_ON(exec);
+                    start_mrr = 1;
                     sphere_chunk_begin_locked(sphere, current->rtcb);
                     BUG_ON(NULL == current->rtcb->chunk);
-            #ifdef CONFIG_MRR
-                    mrr_set_chunk_size(current->rtcb->chunk->inst_count);
-            #endif
             }
         }
 
         mutex_unlock(&sphere->mutex);
+
+#ifdef CONFIG_MRR
+        if (start_mrr) {
+                prepare_mrr(current);
+        }
+#endif
+    
 }
 
 
@@ -960,11 +976,40 @@ void sphere_chunk_begin(struct task_struct *tsk) {
 }
 
 
+/*
+ * this function does not lock the sphere mutex since it doesn't
+ * need to.
+ */
 void sphere_chunk_end(struct task_struct *tsk) {
+
+        /*
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);
         sphere_chunk_end_locked(sphere, tsk->rtcb);
         mutex_unlock(&sphere->mutex);
+        */
+
+        chunk_t *chunk;
+        uint32_t idx, i, me;
+        rtcb_t *rtcb = tsk->rtcb;
+        replay_sphere_t *sphere = tsk->rtcb->sphere;
+
+        chunk = rtcb->chunk;
+        me = chunk->processor_id;
+
+        // signal the next ticket
+        atomic_inc(&sphere->cur_tickets[me]);
+        wake_up_all(&sphere->tickets_wait_queue);
+        
+        // signal the semaphores            
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                for(i = 0; i < chunk->succ_vec[idx]; i++) {
+                        up(&(sphere->proc_sem[me][idx]));
+                }
+        }
+
+        rtcb->chunk = NULL;
+        kfree(chunk);
 }
 
 

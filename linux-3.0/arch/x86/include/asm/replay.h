@@ -28,7 +28,6 @@ typedef struct chunk_struct {
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
-        uint32_t my_ticket;
 } chunk_t;
 
 #ifdef __KERNEL__
@@ -121,6 +120,8 @@ typedef struct replay_thread_control_block {
         uint64_t send_sig;
 
         struct chunk_struct *chunk;
+        uint32_t my_ticket;
+        int is_in_chunk_begin;
 #ifdef CONFIG_MRR
         // TODO: change this later
         char chunk_size_buffer[1024];
@@ -131,7 +132,8 @@ void rr_syscall_enter(struct pt_regs *regs);
 void rr_syscall_exit(struct pt_regs *regs);
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
 void rr_thread_exit(struct pt_regs *regs);
-void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p);
+void rr_switch_from(struct task_struct *prev_p);
+void rr_switch_to(struct task_struct *next_p);
 int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);

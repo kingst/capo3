@@ -51,9 +51,6 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
-#ifdef CONFIG_RECORD_REPLAY
-#include <asm/replay.h>
-#endif
 
 asmlinkage extern void ret_from_fork(void);
 
@@ -382,12 +379,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 	unsigned fsindex, gsindex;
 	bool preload_fpu;
-
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
-           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
-                rr_switch_to(prev_p, next_p);
-#endif
 
 	/*
 	 * If the task has used fpu the last 5 timeslices, just do a full

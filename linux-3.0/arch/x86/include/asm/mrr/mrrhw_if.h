@@ -26,6 +26,8 @@
 #define __MRR_INST_RECORD                       ".byte 0x0F, 0x38, 0x55 ;"
 #define __MRR_INST_REPLAY                       ".byte 0x0F, 0x38, 0x56 ;"
 #define __MRR_INST_SET_CHUNK_SIZE               ".byte 0x0F, 0x38, 0x57 ;"
+#define __MRR_INST_GET_CHUNK_SIZE               ".byte 0x0F, 0x38, 0x58 ;"
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Misc contants

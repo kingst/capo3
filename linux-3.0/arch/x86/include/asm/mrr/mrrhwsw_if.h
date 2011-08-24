@@ -39,12 +39,25 @@ static inline int mrr_flush(void *paddr, int actor_id) {
     return ret;
 }
 
-static inline void mrr_set_chunk_size(int size) {
+static inline void mrr_set_target_chunk_size(int size) {
     asm volatile (
         __MRR_INST_SET_CHUNK_SIZE
         : // no output
         : "a" (size)
     );
+}
+
+static inline int mrr_get_chunk_size(int reset) {
+
+    int ret;
+
+    asm volatile (
+        __MRR_INST_GET_CHUNK_SIZE
+        : "=a" (ret)
+        : "a" (reset)
+    );
+
+    return ret;
 }
 
 /**
@@ -65,7 +78,8 @@ void set_mrr_chunk_done_handler_cb(mrr_chunk_done_handler_sig cb);
 #define mrr_set_replay()                ((void) 0)
 #define mrr_flush_buffer(nthg,nthg1)    ((void) 0)
 #define mrr_flush(nthg,nthg1)           ((void) 0)
-#define mrr_set_chunk_size(nthg)        ((void) 0)
+#define mrr_set_target_chunk_size(nthg) ((void) 0)
+#define mrr_get_chunk_size(nthg)        ((void) 0)
 
 #endif // CONFIG_MRR
 

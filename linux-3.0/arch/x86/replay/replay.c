@@ -495,6 +495,8 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
+        rtcb->my_ticket = 0;
+        rtcb->is_in_chunk_begin = 0;
         tsk->rtcb = rtcb;
 }
 
@@ -504,12 +506,10 @@ void rr_thread_exit(struct pt_regs *regs) {
         sanity_check(current);
 
 #ifdef CONFIG_MRR
-    // flush the mrr buffer, if necessary
-    if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
-        if (sphere_is_recording(current->rtcb->sphere) && test_tsk_thread_flag(current, TIF_MRR_CHUNKING)) {
-            mrr_buffer_full_handler(current, true);
-        }
-    }
+        // we are switching away from this thread,
+        // so call mrr_switch_from
+        // this does not need to grab the mutex --Nima
+        mrr_switch_from(current);
 #endif
 
         current->rtcb = NULL;
@@ -526,23 +526,32 @@ void rr_thread_exit(struct pt_regs *regs) {
         kfree(rtcb);
 }
 
-void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
-
+/*
+ * this is called when we are still in the context of prev_p
+ */
+void rr_switch_from(struct task_struct *prev_p) {
 #ifdef CONFIG_MRR
     // flush the mrr buffer, if necessary
     if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
+        BUG_ON(current != prev_p);
         sanity_check(prev_p);
-        if (sphere_is_recording(prev_p->rtcb->sphere) && test_tsk_thread_flag(prev_p, TIF_MRR_CHUNKING)) {
-            mrr_buffer_full_handler(prev_p, true);
-        }
-    }
-
-    if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
-        sanity_check(next_p);
-        prepare_mrr(next_p);
+        mrr_switch_from(prev_p);
     }
 #endif
+}
 
+/*
+ * this is called when we are in the context of next_p
+ */
+void rr_switch_to(struct task_struct *next_p) {
+#ifdef CONFIG_MRR
+    // prepare the mrr hw for the next thread, if necessary
+    if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
+        BUG_ON(current != next_p);
+        sanity_check(next_p);
+        mrr_switch_to(next_p);
+    }
+#endif
 }
 
 int rr_general_protection(struct pt_regs *regs) {
