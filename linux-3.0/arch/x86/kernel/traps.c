@@ -547,6 +547,27 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	int user_icebp = 0;
 	unsigned long dr6;
 	int si_code;
+
+#ifdef CONFIG_RECORD_REPLAY
+        /* 
+         * Single stepping during the replay of a process. If replaying it will
+         * enforces memory interleaving, and handle resetting the single
+         * stepping functionality so that we do not go past the end of a chunk.
+         */
+        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) &&
+                        sphere_is_replaying(tsk->rtcb->sphere) ){
+                tsk->rtcb->numInst++;  // Just a DEBUG counter TODO remove later
+                /*
+                   printk(KERN_CRIT "The current instruction is: %llu\n",
+                   tsk->rtcb->numInst++);
+                   printk(KERN_INFO 
+                                "do_debug: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
+                                tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
+                 */
+                //preempt_conditional_cli(regs);
+                return;
+        }
+#endif
                 
 	get_debugreg(dr6, 6);
 
@@ -582,27 +603,6 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 
 	/* It's safe to allow irq's after DR6 has been saved */
 	preempt_conditional_sti(regs);
-
-#ifdef CONFIG_RECORD_REPLAY
-        /* 
-         * Single stepping during the replay of a process. If replaying it will
-         * enforces memory interleaving, and handle resetting the single
-         * stepping functionality so that we do not go past the end of a chunk.
-         */
-        if(test_tsk_thread_flag(tsk, TIF_RECORD_REPLAY) &&
-                        sphere_is_replaying(tsk->rtcb->sphere) ){
-                tsk->rtcb->numInst++;  // Just a DEBUG counter TODO remove later
-                /*
-                   printk(KERN_CRIT "The current instruction is: %llu\n",
-                   tsk->rtcb->numInst++);
-                   printk(KERN_INFO 
-                                "do_debug: %s[%d] ip:0x%lx sp:0x%lx flags:0x%lx \n",
-                                tsk->comm, tsk->pid, regs->ip, regs->sp, regs->flags);
-                 */
-                preempt_conditional_cli(regs);
-                return;
-        }
-#endif
 
 	if (regs->flags & X86_VM_MASK) {
 		handle_vm86_trap((struct kernel_vm86_regs *) regs,
