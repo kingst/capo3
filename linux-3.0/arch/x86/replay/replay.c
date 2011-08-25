@@ -317,7 +317,15 @@ void rr_syscall_enter(struct pt_regs *regs) {
 
         if(!sphere_has_first_execve(rtcb->sphere))
                 return;
-        
+
+        if(rtcb->chunk) {
+                long dr7;
+                BUG_ON(get_debugreg(dr7, 7) != 0x1);
+                printk(KERN_CRIT "debug register set to 0x%p\n", (void *) native_get_debugreg(0));
+        } else {
+                printk(KERN_CRIT "syscall enter chunk == NULL\n");
+        }
+
         // we clear send_sig here because we use it to prevent recording spurious
         // syscall_exit events that happen when we send signals on the syscall
         // return path
@@ -519,16 +527,24 @@ void rr_thread_exit(struct pt_regs *regs) {
 void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
         replay_sphere_t *sphere;
         chunk_t *chunk;
+        long dr7;
 
         if(prev_p->rtcb != NULL) {
-                set_debugreg(0, 7);
-                set_debugreg(0, 0);
+                chunk = prev_p->rtcb->chunk;
+                if(chunk != NULL) {
+                        BUG_ON(get_debugreg(dr7, 7) != 0x1);
+                        set_debugreg(0, 7);
+                        set_debugreg(0, 0);
+                } else {
+                        printk(KERN_CRIT "switchto chunk == null\n");
+                }
         }
         
         if(next_p->rtcb != NULL) {
                 sphere = next_p->rtcb->sphere;
                 chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
+                printk(KERN_CRIT "switch_to chunk = 0x%p\n", chunk);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
                         sphere_set_breakpoint(chunk->ip);
                 }

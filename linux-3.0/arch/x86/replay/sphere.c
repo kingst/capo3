@@ -723,6 +723,10 @@ void sphere_reset(replay_sphere_t *sphere) {
         sphere->fifo_head_ctu_buf = 0;
         sphere->is_chunk_replay = 0;
 
+        if(kfifo_len(&sphere->chunk_fifo) > 0)
+                printk(KERN_CRIT "Warning, chunk fifo still has data.....\n");
+        kfifo_init(&sphere->chunk_fifo, sphere->chunk_buffer, CHUNK_BUFFER_SIZE);
+
         BUG_ON(sphere->has_fifo_reader);
         sphere->has_fifo_reader = 0;
         BUG_ON(sphere->has_fifo_writer);
