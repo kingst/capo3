@@ -47,6 +47,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 
 void startRecording(int replayFd) {
         int ret = ioctl(replayFd, REPLAY_IOC_START_RECORDING, 0);
@@ -156,4 +157,73 @@ struct execve_data *readExecveData(void) {
         }
 
         return e;
+}
+
+static unsigned char readUChar(int fd) {
+        unsigned char c;
+        int ret;
+
+        ret = read(fd, &c, sizeof(c));
+        assert(ret == sizeof(c));
+
+        return c;
+}
+
+static uint32_t readUInt(int fd) {
+        uint32_t c;
+        int ret;
+
+        ret = read(fd, &c, sizeof(c));
+        assert(ret == sizeof(c));
+
+        return c;
+}
+
+static unsigned long readULong(int fd) {
+        unsigned long c;
+        int ret;
+
+        ret = read(fd, &c, sizeof(c));
+        assert(ret == sizeof(c));
+
+        return c;
+}
+
+static void fillSuccPred(chunk_t *chunk, unsigned char succ, unsigned char pred) {
+        int idx;
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                if(succ & (1<<idx)) {
+                        chunk->succ_vec[idx]++;
+                }
+                if(pred & (1<<idx)) {
+                        chunk->pred_vec[idx]++;
+                }
+        }
+}
+
+
+int read_chunk(int chunkFd, chunk_t *chunk) {
+        unsigned char c, succ, pred;
+        int ret;
+
+        memset(chunk, 0, sizeof(*chunk));
+        while((ret = read(chunkFd, &c, sizeof(c))) == 1) {
+                if(c == 0xff) {
+                        succ = readUChar(chunkFd);
+                        pred = readUChar(chunkFd);
+                        fillSuccPred(chunk, succ, pred);
+                } else {
+                        chunk->processor_id = c;
+                        chunk->thread_id = readUChar(chunkFd);
+                        chunk->inst_count = readUInt(chunkFd);
+                        chunk->ip = readULong(chunkFd);
+                        succ = readUChar(chunkFd);
+                        pred = readUChar(chunkFd);
+                        fillSuccPred(chunk, succ, pred);
+
+                        return 1;
+                }
+        }
+
+        return 0;
 }

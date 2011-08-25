@@ -79,5 +79,6 @@ struct execve_data {
 
 struct execve_data *readExecveData(void);
 char *readBuffer(void);
+int read_chunk(int chunkFd, chunk_t *chunk);
 
 #endif
