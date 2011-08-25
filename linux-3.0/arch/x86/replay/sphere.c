@@ -103,6 +103,7 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         int flen;
 
         BUG_ON(current->rtcb != NULL);
+        BUG_ON(sphere->has_fifo_reader);
 
         if(sphere_is_done_recording(sphere))
                 return 0;
@@ -120,7 +121,13 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
         if(flen < count)
                 count = flen;
 
+        sphere->has_fifo_reader = 1;
+        mutex_unlock(&sphere->mutex);
+
         ret = kfifo_to_user(&sphere->fifo, buf, count, &bytesRead);
+
+        mutex_lock(&sphere->mutex);
+        sphere->has_fifo_reader = 0;
 
         // don't worry about signalling anyone, we assume that rthreads don't block
         // when writing to the queue
@@ -139,6 +146,8 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
         int favail;
         replay_state_t state;
 
+        BUG_ON(sphere->has_fifo_writer);
+
         while(kfifo_is_full(fifo))
                 cond_wait(full_cond, &sphere->mutex);
 
@@ -153,7 +162,14 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
         if(favail < count)
                 count = favail;
 
+        // the fifo to/from user calls can sleep, make sure we give up lock.
+        sphere->has_fifo_writer = 1;
+        mutex_unlock(&sphere->mutex);
+
         ret = kfifo_from_user(fifo, buf, count, &bytesWritten);
+
+        mutex_lock(&sphere->mutex);
+        sphere->has_fifo_writer = 0;
         cond_broadcast(next_rec_cond);
 
         // it might return -EFAULT, which we will pass back
@@ -665,6 +681,11 @@ replay_sphere_t *sphere_alloc(void) {
         sphere->next_chunk = NULL;
         sphere->is_chunk_replay = 0;
 
+        sphere->has_fifo_reader = 0;
+        sphere->has_fifo_writer = 0;
+        sphere->has_chunk_fifo_reader = 0;
+        sphere->has_chunk_fifo_writer = 0;
+
         mutex_init(&sphere->mutex);
 
         return sphere;
@@ -682,6 +703,15 @@ void sphere_reset(replay_sphere_t *sphere) {
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         sphere->fifo_head_ctu_buf = 0;
         sphere->is_chunk_replay = 0;
+
+        BUG_ON(sphere->has_fifo_reader);
+        sphere->has_fifo_reader = 0;
+        BUG_ON(sphere->has_fifo_writer);
+        sphere->has_fifo_writer = 0;
+        BUG_ON(sphere->has_chunk_fifo_reader);
+        sphere->has_chunk_fifo_reader = 0;
+        BUG_ON(sphere->has_chunk_fifo_writer);
+        sphere->has_chunk_fifo_writer = 0;
         // XXX FIXME we should do something to reset the proc_sem semaphores
         // or throw a bug if there are any threads waiting on them or they
         // have values

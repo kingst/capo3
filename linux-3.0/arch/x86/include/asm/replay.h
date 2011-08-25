@@ -91,6 +91,10 @@ typedef struct replay_sphere {
         // these variables are only accessed by usermode
         struct mutex mutex;
         atomic_t fd_count;
+        int has_fifo_reader;
+        int has_chunk_fifo_reader;
+        int has_fifo_writer;
+        int has_chunk_fifo_writer;
 
         // these variables are only accessed by rr threads
         int fifo_head_ctu_buf;
@@ -107,6 +111,7 @@ typedef struct replay_sphere {
         cond_t chunk_next_record_cond;
         struct chunk_struct *next_chunk;
         int is_chunk_replay;
+        
 } replay_sphere_t;
 
 typedef struct replay_thread_control_block {
