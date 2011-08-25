@@ -105,7 +105,6 @@ int main(int argc, char *argv[], char *envp[]) {
                 return 1;
         }
 
-        printf("is this thing on????\n");
         replayFd = open("/dev/replay0", O_RDONLY | O_CLOEXEC);
         if(replayFd < 0) {
                 fprintf(stderr, "could not open /dev/replay device\n");

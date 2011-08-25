@@ -67,7 +67,6 @@ void startChunking(int replayFd) {
 pid_t startChild(int replayFd, char *argv[], char *envp[], start_t type) {
         pid_t pid;
 
-        printf("startChild\n");
         pid = fork();
         if(pid == 0) {
                 dup2(STDERR_FILENO, STDOUT_FILENO);
@@ -82,8 +81,6 @@ pid_t startChild(int replayFd, char *argv[], char *envp[], start_t type) {
                 }
                 execve(argv[0], argv, envp);
                 assert(0);
-        } else {
-                printf("my pid = %d, child pid = %d\n", getpid(), pid);
         }
 
         return pid;

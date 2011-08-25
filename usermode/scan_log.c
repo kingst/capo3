@@ -46,13 +46,29 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 #include "util.h"
 
-int main(void) {
+int main(int argc, char *argv[]) {
         replay_header_t header;
         int ret;
         struct execve_data *e;
+
+        if(argc >= 3) {
+                fprintf(stderr, "Usage %s: [replay.log]\n", argv[0]);
+                return 0;
+        }
+
+        if(argc == 2) {
+                ret = open(argv[1], O_RDONLY);
+                if(ret < 0) {
+                        fprintf(stderr, "could not open file %s\n", argv[1]);
+                        return 0;
+                }
+                dup2(ret, STDIN_FILENO);
+        }
         
         while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
                 assert(ret == sizeof(header));
