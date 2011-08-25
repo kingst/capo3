@@ -20,7 +20,9 @@ int main(void) {
 
         //signal(SIGCHLD, handler);
 
+        printf("parent pid = %d\n", getpid());
         if(fork() == 0) {
+                printf("child pid = %d\n", getpid());
                 execl("/bin/busybox","tar", "-xvf", "tmp.tar", NULL);
                 assert(0);
         }

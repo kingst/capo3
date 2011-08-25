@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
         int replayFd, ret, bytesWritten, status, len;
         replay_header_t header;
         struct execve_data *e;
-        int chunkFd;
+        int chunkFd = -1;
 
         if(argc > 2) {
                 fprintf(stderr, "Usage %s: [chunk_log] < replay_log\n", argv[0]);
@@ -171,9 +171,6 @@ int main(int argc, char *argv[]) {
                 if(fork() == 0) {
                         handle_chunk_log(chunkFd);
                         exit(0);
-                } else {
-                        close(chunkFd);
-                        chunkFd = -1;
                 }
         }
 
@@ -181,7 +178,13 @@ int main(int argc, char *argv[]) {
         assert(ret == sizeof(header));
     
         e = readExecveData();
-        startChild(replayFd, e->argv, e->envp, 0);
+        if(chunkFd < 0) {
+                startChild(replayFd, e->argv, e->envp, START_REPLAY);
+        } else {
+                close(chunkFd);
+                chunkFd = -1;
+                startChild(replayFd, e->argv, e->envp, START_CHUNKED_REPLAY);
+        }
 
         while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
                 bytesWritten = 0;

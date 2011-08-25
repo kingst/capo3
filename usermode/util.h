@@ -66,7 +66,8 @@ struct pt_regs {
 
 #include "../linux-3.0/arch/x86/include/asm/replay.h"
 
-pid_t startChild(int replayFd, char *argv[], char *envp[], int rec);
+typedef enum {START_REPLAY, START_RECORD, START_CHUNKED_REPLAY} start_t;
+pid_t startChild(int replayFd, char *argv[], char *envp[], start_t type);
 
 struct execve_data {
     char *fileName;

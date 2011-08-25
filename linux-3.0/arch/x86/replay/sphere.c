@@ -60,11 +60,15 @@
 #include <linux/file.h>
 #include <linux/mman.h>
 #include <linux/syscalls.h>
+#include <linux/perf_event.h>
+#include <linux/hw_breakpoint.h>
 
 #include <trace/syscall.h>
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#include <asm/hw_breakpoint.h>
+#include <asm/debugreg.h>
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
 #define CHUNK_BUFFER_SIZE (16*1024)
@@ -97,10 +101,12 @@ static int sphere_is_done_recording(replay_sphere_t *sphere) {
         return (atomic_read(&sphere->state) == done) && (kfifo_len(&sphere->fifo) == 0);
 }
 
+
 static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, size_t count) {
         int ret;
         int bytesRead=0;
         int flen;
+
 
         BUG_ON(current->rtcb != NULL);
         BUG_ON(sphere->has_fifo_reader);
@@ -424,6 +430,12 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
+
+static void set_breakpoint(unsigned long ip) {
+        set_debugreg(ip, 0);
+        set_debugreg(0x1, 7);
+}
+
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
         BUG_ON(header->type != syscall_exit_event);        
 
@@ -462,9 +474,6 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
-        if((header->type == syscall_exit_event) && (regs_syscallno(&header->regs) == __NR_execve))
-                sphere->replay_first_execve = 1;
-
         if(header->type == syscall_enter_event) {
                 if(sphere->replay_first_execve)
                         check_regs(regs, &header->regs);
@@ -768,9 +777,11 @@ int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf,
 
 int sphere_fifo_to_user(replay_sphere_t *sphere, char __user *buf, size_t count) {
         int ret;
+
         mutex_lock(&sphere->mutex);
         ret = sphere_fifo_to_user_ll(sphere, buf, count);
         mutex_unlock(&sphere->mutex);
+
         return ret;
 }
 
@@ -796,6 +807,8 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
 
 int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
         int ret = 0;
+
+        printk(KERN_CRIT "starting chunking ...\n");
 
         mutex_lock(&sphere->mutex);
         BUG_ON(!sphere_is_replaying(sphere));
@@ -858,13 +871,14 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
 
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len) {
         int ret;
-
+        struct task_struct *tsk = current;
+        struct pt_regs *regs = task_pt_regs(tsk);
 
         while(mutex_trylock(&sphere->mutex) == 0)
                 ;
 
         ret = record_header_locked(sphere, copy_to_user_event,
-                                   current->rtcb->thread_id, task_pt_regs(current));
+                                   current->rtcb->thread_id, regs);
         if(ret) {
                 mutex_unlock(&sphere->mutex);
                 BUG();
@@ -891,23 +905,37 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         // thread that executes execve, gets chunking started        
         if(sphere_is_chunk_replaying(sphere) && (exec != sphere->replay_first_execve)) {
                 BUG_ON(exec);                
-                sphere_chunk_begin_locked(sphere, current->rtcb);
+                //sphere_chunk_begin_locked(sphere, current->rtcb);
         }
         mutex_unlock(&sphere->mutex);
 }
 
 void sphere_chunk_begin(struct task_struct *tsk) {
+        /*
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);
         sphere_chunk_begin_locked(sphere, tsk->rtcb);
         mutex_unlock(&sphere->mutex);
+        */
 }
 void sphere_chunk_end(struct task_struct *tsk) {
+        /*
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);
         sphere_chunk_end_locked(sphere, tsk->rtcb);
         mutex_unlock(&sphere->mutex);
+        */
 }
 
+void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs) {
+        if((regs_syscallno(regs) == __NR_execve) &&
+           (sphere->replay_first_execve == 0)) {
+                sphere->replay_first_execve = 1;
+        }
+}
+
+int sphere_has_first_execve(replay_sphere_t *sphere) {
+        return sphere->replay_first_execve;
+}
 
 /**********************************************************************************************/

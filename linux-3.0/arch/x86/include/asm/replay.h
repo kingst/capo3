@@ -119,6 +119,7 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
+        int stepping;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
@@ -130,6 +131,7 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);
 int rr_deliver_signal(int signr, struct pt_regs *regs);
+int rr_do_debug(struct pt_regs *regs, long error_code);
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt
@@ -164,6 +166,9 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
 void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *buf, int32_t len);
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs);
+
+int sphere_has_first_execve(replay_sphere_t *sphere);
+void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
 
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);

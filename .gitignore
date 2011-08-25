@@ -4,3 +4,8 @@
 *.asm
 *.bin
 *~
+usermode/record
+usermode/replay
+usermode/replay.log
+usermode/scan_log
+usermode/test

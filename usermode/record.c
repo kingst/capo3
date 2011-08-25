@@ -105,6 +105,7 @@ int main(int argc, char *argv[], char *envp[]) {
                 return 1;
         }
 
+        printf("is this thing on????\n");
         replayFd = open("/dev/replay0", O_RDONLY | O_CLOEXEC);
         if(replayFd < 0) {
                 fprintf(stderr, "could not open /dev/replay device\n");
@@ -115,7 +116,7 @@ int main(int argc, char *argv[], char *envp[]) {
 
         argv++;
         recordExecve(argv[0], argv, envp);
-        startChild(replayFd, argv, envp, 1);
+        startChild(replayFd, argv, envp, START_RECORD);
 
         while((ret = read(replayFd, buf, sizeof(buf))) > 0) {
                 bytesWritten = write(STDOUT_FILENO, buf, ret);
