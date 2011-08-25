@@ -53,16 +53,26 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <string.h>
+#include <asm/unistd.h>
 
 #include "util.h"
 
+void write_bytes(int fd, void *tbuf, int len) {
+        int ret;
+        int bytesWritten = 0;
+        char *buf = (char *) tbuf;
+
+        while(bytesWritten < len) {
+                ret = write(fd, buf+bytesWritten, len-bytesWritten);
+                assert(ret > 0);
+                bytesWritten += ret;
+        }
+}
 
 
 void handle_chunk_log(int chunkFd) {
         int replayFd;
         chunk_t chunk;
-        unsigned char *buf;
-        unsigned int bytesWritten;
         int ret;
 
         replayFd = open("/dev/replay0", O_WRONLY | O_CLOEXEC);
@@ -74,18 +84,13 @@ void handle_chunk_log(int chunkFd) {
         assert(ret == 0);
 
         while(read_chunk(chunkFd, &chunk)) {
-                bytesWritten = 0;
-                buf = (unsigned char *) &chunk;
-                while(bytesWritten < sizeof(chunk)) {
-                        ret = write(replayFd, buf+bytesWritten, sizeof(chunk)-bytesWritten);
-                        bytesWritten += ret;
-                }
+                write_bytes(replayFd, &chunk, sizeof(chunk));
         }
 }
 
 int main(int argc, char *argv[]) {
         unsigned char buf[4096];
-        int replayFd, ret, bytesWritten, status, len;
+        int replayFd, ret, status;
         replay_header_t header;
         struct execve_data *e;
         int chunkFd = -1;
@@ -127,15 +132,25 @@ int main(int argc, char *argv[]) {
                 startChild(replayFd, e->argv, e->envp, START_CHUNKED_REPLAY);
         }
 
-        while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
-                bytesWritten = 0;
-                len = ret;
-                while(bytesWritten < len) {
-                        ret = write(replayFd, buf+bytesWritten, len-bytesWritten);
-                        assert(ret > 0);
-                        bytesWritten += ret;
+        // before we start pushing data down to the kernel, burn off the ioctl entries
+        // at the beginning of the stream until we get the return from the first execve
+        while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
+                assert(ret == sizeof(header));
+                if((header.type == syscall_exit_event) && (header.regs.orig_rax == __NR_execve)) {
+                        write_bytes(replayFd, &header, sizeof(header));
+                        break;
+                } else if(header.type == copy_to_user_event) {
+                        readBuffer();
+                } else if((header.type != syscall_exit_event) && (header.type != syscall_enter_event)) {
+                        write_bytes(replayFd, &header, sizeof(header));
                 }
         }
+
+        assert((header.type == syscall_exit_event) && (header.regs.orig_rax == __NR_execve));
+
+        while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
+                write_bytes(replayFd, buf, ret);
+        } 
 
         while(wait(&status) != -1)
                 ;
