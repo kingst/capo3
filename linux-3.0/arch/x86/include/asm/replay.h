@@ -92,7 +92,6 @@ typedef struct replay_sphere {
         struct mutex mutex;
         atomic_t fd_count;
         int has_fifo_reader;
-        int has_chunk_fifo_reader;
         int has_fifo_writer;
         int has_chunk_fifo_writer;
 

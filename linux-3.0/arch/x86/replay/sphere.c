@@ -140,13 +140,14 @@ static int sphere_fifo_to_user_ll(replay_sphere_t *sphere, char __user *buf, siz
 }
 
 static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *buf, size_t count, 
-                                    struct kfifo *fifo, cond_t *full_cond, cond_t *next_rec_cond) {
+                                    struct kfifo *fifo, cond_t *full_cond, cond_t *next_rec_cond,
+                                    int *writer) {
         int ret;
         int bytesWritten=0;
         int favail;
         replay_state_t state;
 
-        BUG_ON(sphere->has_fifo_writer);
+        BUG_ON(*writer);
 
         while(kfifo_is_full(fifo))
                 cond_wait(full_cond, &sphere->mutex);
@@ -163,13 +164,13 @@ static int sphere_fifo_from_user_ll(replay_sphere_t *sphere, const char __user *
                 count = favail;
 
         // the fifo to/from user calls can sleep, make sure we give up lock.
-        sphere->has_fifo_writer = 1;
+        *writer = 1;
         mutex_unlock(&sphere->mutex);
 
         ret = kfifo_from_user(fifo, buf, count, &bytesWritten);
 
         mutex_lock(&sphere->mutex);
-        sphere->has_fifo_writer = 0;
+        *writer = 0;
         cond_broadcast(next_rec_cond);
 
         // it might return -EFAULT, which we will pass back
@@ -683,7 +684,6 @@ replay_sphere_t *sphere_alloc(void) {
 
         sphere->has_fifo_reader = 0;
         sphere->has_fifo_writer = 0;
-        sphere->has_chunk_fifo_reader = 0;
         sphere->has_chunk_fifo_writer = 0;
 
         mutex_init(&sphere->mutex);
@@ -708,8 +708,6 @@ void sphere_reset(replay_sphere_t *sphere) {
         sphere->has_fifo_reader = 0;
         BUG_ON(sphere->has_fifo_writer);
         sphere->has_fifo_writer = 0;
-        BUG_ON(sphere->has_chunk_fifo_reader);
-        sphere->has_chunk_fifo_reader = 0;
         BUG_ON(sphere->has_chunk_fifo_writer);
         sphere->has_chunk_fifo_writer = 0;
         // XXX FIXME we should do something to reset the proc_sem semaphores
@@ -752,7 +750,8 @@ int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_
         int ret;
         mutex_lock(&sphere->mutex);
         ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->fifo, 
-                                       &sphere->queue_full_cond, &sphere->next_record_cond);
+                                       &sphere->queue_full_cond, &sphere->next_record_cond,
+                                       &sphere->has_fifo_writer);
         mutex_unlock(&sphere->mutex);
         return ret;
 }
@@ -761,7 +760,8 @@ int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf,
         int ret;
         mutex_lock(&sphere->mutex);
         ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->chunk_fifo, 
-                                       &sphere->chunk_queue_full_cond, &sphere->chunk_next_record_cond);
+                                       &sphere->chunk_queue_full_cond, &sphere->chunk_next_record_cond,
+                                       &sphere->has_chunk_fifo_writer);
         mutex_unlock(&sphere->mutex);
         return ret;
 }
