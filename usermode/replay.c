@@ -57,19 +57,6 @@
 
 #include "util.h"
 
-void write_bytes(int fd, void *tbuf, int len) {
-        int ret;
-        int bytesWritten = 0;
-        char *buf = (char *) tbuf;
-
-        while(bytesWritten < len) {
-                ret = write(fd, buf+bytesWritten, len-bytesWritten);
-                assert(ret > 0);
-                bytesWritten += ret;
-        }
-}
-
-
 void handle_chunk_log(int chunkFd) {
         int replayFd;
         chunk_t chunk;
@@ -83,9 +70,15 @@ void handle_chunk_log(int chunkFd) {
         ret = ioctl(replayFd, REPLAY_IOC_SET_CHUNK_LOG_FD, 0);
         assert(ret == 0);
 
+        while((ret = read(chunkFd, &chunk, sizeof(chunk))) > 0) {
+                write_bytes(replayFd, &chunk, sizeof(chunk));
+        }
+
+        /*
         while(read_chunk(chunkFd, &chunk)) {
                 write_bytes(replayFd, &chunk, sizeof(chunk));
         }
+        */
 }
 
 int main(int argc, char *argv[]) {

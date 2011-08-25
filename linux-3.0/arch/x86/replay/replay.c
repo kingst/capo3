@@ -191,7 +191,6 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 ret = sphere_start_recording(sphere);
                 rr_thread_create(current, sphere);
         } else if(cmd == REPLAY_IOC_START_REPLAYING) {
-                printk(KERN_CRIT "ioctl start replaying %ld\n", sys_getpid());
                 ret = sphere_start_replaying(sphere);
                 rr_thread_create(current, sphere);
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
@@ -202,7 +201,6 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 rr_thread_create(current, sphere);
                 ret = sphere_start_chunking(sphere, current->rtcb);
         } else if(cmd == REPLAY_IOC_SET_CHUNK_LOG_FD) {
-                printk(KERN_CRIT "ioctl set chunk fd %ld\n", sys_getpid());
                 sfd->is_chunk_log_fd = 1;
         } else {
                 BUG();
@@ -513,7 +511,7 @@ void rr_thread_exit(struct pt_regs *regs) {
 
         sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
 
-        BUG_ON(rtcb->chunk != NULL);
+        //BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }
@@ -532,9 +530,7 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
                 chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
-                        BUG_ON(chunk->ip >= PAGE_OFFSET);
-                        set_debugreg(chunk->ip, 0);
-                        set_debugreg(0x1, 7);
+                        sphere_set_breakpoint(chunk->ip);
                 }
         }
 }
@@ -586,6 +582,7 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
 
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
+        unsigned long dr6;
 
         if(rtcb == NULL)
                 return 0;
@@ -593,6 +590,19 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
         if(rtcb->chunk == NULL)
                 return 0;
 
+        get_debugreg(dr6, 6);
+        if(dr6 & (1<<14)) {
+                printk(KERN_CRIT "single step\n");
+                BUG();
+        } else {
+                BUG_ON((dr6 & 1) == 0);
+                printk(KERN_CRIT "breakpoint\n");
+                sphere_set_breakpoint(0);
+                sphere_chunk_end(current);
+        }
+        set_debugreg(0, 6);
+
+        /*
         if(rtcb->stepping) {
                 printk(KERN_CRIT "stepping ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
                 set_debugreg(rtcb->chunk->ip, 0);
@@ -607,6 +617,7 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                 rtcb->stepping = 1;
                 regs->flags |= X86_EFLAGS_TF;
         }
+        */
 
         return 1;
 }

@@ -49,6 +49,19 @@
 #include <assert.h>
 #include <string.h>
 
+void write_bytes(int fd, void *tbuf, int len) {
+        int ret;
+        int bytesWritten = 0;
+        char *buf = (char *) tbuf;
+
+        while(bytesWritten < len) {
+                ret = write(fd, buf+bytesWritten, len-bytesWritten);
+                assert(ret > 0);
+                bytesWritten += ret;
+        }
+}
+
+
 void startRecording(int replayFd) {
         int ret = ioctl(replayFd, REPLAY_IOC_START_RECORDING, 0);
         assert(ret == 0);

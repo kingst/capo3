@@ -28,6 +28,7 @@ typedef struct chunk_struct {
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
+        unsigned long next_ip;
 } chunk_t;
 
 #ifdef __KERNEL__
@@ -173,6 +174,7 @@ void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);
 void sphere_chunk_end(struct task_struct *tsk);
+void sphere_set_breakpoint(unsigned long ip);
 
 #endif
 
