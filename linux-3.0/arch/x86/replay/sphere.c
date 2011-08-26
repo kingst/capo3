@@ -72,7 +72,7 @@
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
 #define CHUNK_BUFFER_SIZE (16*1024)
-#define PRINT_DEBUG 0
+#define PRINT_DEBUG 1
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -425,7 +425,7 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("first", regs_first(regs), regs_first(stored_regs));
         check_reg("second", regs_second(regs), regs_second(stored_regs));
         check_reg("third", regs_third(regs), regs_third(stored_regs));
-        check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
+        //check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
         check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
         check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
@@ -627,7 +627,6 @@ static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
-        printk(KERN_CRIT "chunk_end\n");
         chunk = rtcb->chunk;
         me = chunk->processor_id;
 
@@ -822,8 +821,6 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
 
 int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
         int ret = 0;
-
-        printk(KERN_CRIT "starting chunking ...\n");
 
         mutex_lock(&sphere->mutex);
         BUG_ON(!sphere_is_replaying(sphere));

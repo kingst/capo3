@@ -327,8 +327,6 @@ void rr_syscall_enter(struct pt_regs *regs) {
                         BUG();
                 }
 
-        } else {
-                printk(KERN_CRIT "syscall enter chunk == NULL\n");
         }
 
         // we clear send_sig here because we use it to prevent recording spurious
