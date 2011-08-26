@@ -487,6 +487,12 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
 
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY) ||
+           test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY))
+                rr_switch_to(prev_p, next_p);
+#endif
+
 	/*
 	 * Preload the FPU context, now that we've determined that the
 	 * task is likely to be using it. 
