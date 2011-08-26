@@ -67,6 +67,7 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#include <asm/capo_perfct.h>
 #include <asm/hw_breakpoint.h>
 #include <asm/debugreg.h>
 
@@ -621,7 +622,13 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         mutex_lock(&sphere->mutex);
 
         rtcb->chunk = chunk;
-        sphere_set_breakpoint(chunk->ip);
+        if(chunk->ip == 0) {
+                // this had better be the last chunk
+                sphere_set_breakpoint(1);
+        } else {
+                sphere_set_breakpoint(chunk->ip);
+        }
+        printk(KERN_CRIT "chunk begin performance counter value = %lld\n", perf_counter_read());
 }
 static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
@@ -638,6 +645,7 @@ static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         }
         mutex_lock(&sphere->mutex);
 
+        printk(KERN_CRIT "chunk done\n");
         rtcb->chunk = NULL;
         kfree(chunk);
 }
@@ -736,6 +744,7 @@ void sphere_reset(replay_sphere_t *sphere) {
         // XXX FIXME we should do something to reset the proc_sem semaphores
         // or throw a bug if there are any threads waiting on them or they
         // have values
+
         mutex_unlock(&sphere->mutex);
 }
 
@@ -844,6 +853,8 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
         } else {
                 replay_event_locked(sphere, thread_create_event, thread_id, regs);
         }
+        // XXX FIXME we need some way to associate this with threads
+        perf_counter_init();
         mutex_unlock(&sphere->mutex);
 
         return thread_id;
@@ -863,6 +874,9 @@ void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_r
         
         if(sphere->num_threads == 0)
                 atomic_set(&sphere->state, done);
+
+        // XXX FIXME we need some way to associate this with a thread
+        perf_counter_term();
 
         mutex_unlock(&sphere->mutex);
 
@@ -916,6 +930,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 sphere->replay_first_execve = 2;
                 sphere_chunk_begin_locked(sphere, current->rtcb);
         }
+
         mutex_unlock(&sphere->mutex);
 }
 
@@ -928,11 +943,13 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         mutex_unlock(&sphere->mutex);
         */
 }
-void sphere_chunk_end(struct task_struct *tsk) {
+void sphere_chunk_end(struct task_struct *tsk, int is_last) {
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);
         sphere_chunk_end_locked(sphere, tsk->rtcb);
-        sphere_chunk_begin_locked(sphere, tsk->rtcb);
+        if(!is_last) {
+                sphere_chunk_begin_locked(sphere, tsk->rtcb);
+        }
         mutex_unlock(&sphere->mutex);
 }
 

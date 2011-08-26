@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
 
         map<uint32_t, chunk_t *>::iterator iter;
         for(iter = last_chunk.begin(); iter != last_chunk.end(); iter++) {
-                iter->second->ip = 0;
+                iter->second->ip = 1;
         }
 
         while(chunk_queue.size() > 0) {

@@ -320,11 +320,13 @@ void rr_syscall_enter(struct pt_regs *regs) {
                 return;
 
         if(rtcb->chunk) {
-                long dr7;
+                long dr7, dr0;
                 get_debugreg(dr7, 7);
-                if((dr7 & 0xf) != 0x1) {
-                        printk("system call %ld\n", regs->orig_ax);
-                        BUG();
+                if(((dr7 & 0xf) != 0x1) && !rtcb->singlestep) {
+                        get_debugreg(dr0, 0);
+                        printk(KERN_CRIT "############# resetting bp system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
+                               regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
+                        sphere_set_breakpoint(rtcb->chunk->ip);
                 }
 
         }
@@ -507,6 +509,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
+        rtcb->singlestep = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -515,6 +518,9 @@ void rr_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
 
         sanity_check();
+
+        if(sphere_is_chunk_replaying(rtcb->sphere))
+                sphere_chunk_end(current, 1);
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -571,8 +577,10 @@ int rr_general_protection(struct pt_regs *regs) {
                 regs->ip += 2;
                 
                 record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
-        } else {
+        } else {                
                 replay_event(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+                // make sure we can trap if the next instruction is a chunk boundary
+                regs->flags &= ~X86_EFLAGS_RF;
         }
 
         return 1;
@@ -608,15 +616,32 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                 return 0;
         get_debugreg(dr6, 6);
 
+        BUG_ON(!user_mode(regs));
+
         if(dr6 & (1<<14)) {
-                printk(KERN_CRIT "single step\n");
-                BUG();
+                BUG_ON(!rtcb->singlestep);
+                rtcb->singlestep = 0;
+                printk(KERN_CRIT "*** step 0x%p\n", (void *) regs->ip);
+                sphere_set_breakpoint(rtcb->chunk->ip);
+                user_disable_single_step(current);
+                // XXX FIXME we need to check if the app just set the trap flag (which should not happen, but could)
+                regs->flags &= ~X86_EFLAGS_TF;
+                BUG_ON(dr6 & 1);
+        } else if(dr6 & 1) {
+                printk(KERN_CRIT "****** breakpoint, num inst = %llu\n", perf_counter_read());
+                sphere_chunk_end(current, 0);
+                if(regs->ip == rtcb->chunk->ip) {
+                        // XXX FIXME I don't know if this will work if the next inst is a syscall
+                        printk(KERN_CRIT "single stepping........\n");
+                        rtcb->singlestep = 1;
+                        sphere_set_breakpoint(0);
+                        user_enable_single_step(current);
+                        regs->flags |= X86_EFLAGS_TF;
+                }
         } else {
-                BUG_ON((dr6 & 1) == 0);
-                printk(KERN_CRIT "breakpoint\n");
-                sphere_set_breakpoint(0);
-                sphere_chunk_end(current);
+                BUG();
         }
+
         set_debugreg(0, 6);
 
         /*

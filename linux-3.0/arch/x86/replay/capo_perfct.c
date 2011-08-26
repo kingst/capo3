@@ -109,8 +109,10 @@ u64 perf_counter_read(void){
 }
 
 void perf_counter_term(void){
-        kfree(attr);
-        attr=NULL;
-        //release the pevent//
-        perf_event_release_kernel(pevent);
+        if(attr != NULL) {
+                kfree(attr);
+                attr=NULL;
+                //release the pevent//
+                perf_event_release_kernel(pevent);
+        }
 }

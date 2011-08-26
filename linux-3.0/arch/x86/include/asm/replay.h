@@ -119,6 +119,7 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
+        int singlestep;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
@@ -171,7 +172,7 @@ void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
 
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);
-void sphere_chunk_end(struct task_struct *tsk);
+void sphere_chunk_end(struct task_struct *tsk, int is_last);
 void sphere_set_breakpoint(unsigned long ip);
 
 #endif
