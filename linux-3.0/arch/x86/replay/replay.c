@@ -63,6 +63,7 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#include <asm/capo_perfct.h>
 
 #define NUM_REPLAY_MINOR 4
 
@@ -555,4 +556,12 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
         }
 }
 
+/**********************************************************************************************/
+
+
+/************* Performance Monitoring Overflow Interrupt Handler ******************************/
+void capo_overflow_handler(struct perf_event * event, int unused, struct
+                perf_sample_data * data, struct pt_regs *regs) {
+
+}
 /**********************************************************************************************/
