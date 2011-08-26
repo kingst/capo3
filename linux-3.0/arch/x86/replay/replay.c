@@ -504,7 +504,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
-        rtcb->stepping = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -532,9 +531,8 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
         if(prev_p->rtcb != NULL) {
                 chunk = prev_p->rtcb->chunk;
                 if(chunk != NULL) {
-                        BUG_ON(get_debugreg(dr7, 7) != 0x1);
-                        set_debugreg(0, 7);
-                        set_debugreg(0, 0);
+                        BUG_ON(get_debugreg(dr7, 7) != 0x1);                        
+                        sphere_set_breakpoint(0);
                 } else {
                         printk(KERN_CRIT "switchto chunk == null\n");
                 }
@@ -605,8 +603,8 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         if(rtcb->chunk == NULL)
                 return 0;
-
         get_debugreg(dr6, 6);
+
         if(dr6 & (1<<14)) {
                 printk(KERN_CRIT "single step\n");
                 BUG();

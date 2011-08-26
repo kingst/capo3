@@ -7,7 +7,7 @@ case $1 in
                 gunzip < ../disk_images/rootfs.ext3.gz > ../disk_images/rootfs.ext3
             fi
         fi
-        qemu-system-x86_64 -m 512 -nographic -smp 8 -kernel ../linux-3.0/arch/x86/boot/bzImage -append "root=/dev/sda rw init=/sbin/init norandmaps console=ttyS0,115200 debug" -hda ../disk_images/rootfs.ext3 -net nic,model=e1000 -net user
+        qemu-system-x86_64 -m 512 -nographic -smp 1 -kernel ../linux-3.0/arch/x86/boot/bzImage -append "root=/dev/sda rw init=/sbin/init norandmaps console=ttyS0,115200 debug" -hda ../disk_images/rootfs.ext3 -net nic,model=e1000 -net user
         ;;
     ubuntu )
         qemu-system-x86_64 -m 512 -smp 8 -hda ../disk_images/ubuntu-10.04-x86_64.qcow2 -nographic -kernel ../linux-3.0/arch/x86/boot/bzImage -append "root=/dev/sda1 rw init=/sbin/init norandmaps console=ttyS0,115200 debug" -net nic,model=e1000 -net user

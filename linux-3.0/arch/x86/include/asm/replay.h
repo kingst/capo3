@@ -28,7 +28,6 @@ typedef struct chunk_struct {
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
-        unsigned long next_ip;
 } chunk_t;
 
 #ifdef __KERNEL__
@@ -120,7 +119,6 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
-        int stepping;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);

@@ -627,6 +627,7 @@ static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
+        printk(KERN_CRIT "chunk_end\n");
         chunk = rtcb->chunk;
         me = chunk->processor_id;
 
