@@ -855,8 +855,6 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
         } else {
                 replay_event_locked(sphere, thread_create_event, thread_id, regs);
         }
-        // XXX FIXME we need some way to associate this with threads
-        perf_counter_init();
         
         mutex_unlock(&sphere->mutex);
 
@@ -933,6 +931,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 if(sphere->replay_first_execve == 1) {
                         sphere->replay_first_execve = 2;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
+                        perf_counter_init();
                 } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;
                         sphere_chunk_begin_locked(sphere, current->rtcb);

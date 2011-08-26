@@ -606,9 +606,12 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
 
 EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
+static int num_inst = 0;
+
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
+        uint64_t ni;
 
         if(rtcb == NULL)
                 return 0;
@@ -629,7 +632,10 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                 regs->flags &= ~X86_EFLAGS_TF;
                 BUG_ON(dr6 & 1);
         } else if(dr6 & 1) {
-                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, perf_counter_read());
+                ni = perf_counter_read();
+                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, ni - num_inst);
+                num_inst = ni;
+                //printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, 0);
                 sphere_chunk_end(current, 0);
                 if(regs->ip == rtcb->chunk->ip) {
                         // XXX FIXME I don't know if this will work if the next inst is a syscall

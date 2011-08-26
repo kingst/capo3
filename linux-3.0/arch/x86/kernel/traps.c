@@ -549,18 +549,22 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	unsigned long dr6;
 	int si_code;
 
+	get_debugreg(dr6, 6);
+
 #ifdef CONFIG_RECORD_REPLAY
         if(test_thread_flag(TIF_RECORD_REPLAY)) {
+                // XXX FIXME there might be issues with dr6
+                preempt_conditional_sti(regs);
                 if(rr_do_debug(regs, error_code)) {
+                        preempt_conditional_cli(regs);
                         return;
                 }
+		preempt_conditional_cli(regs);
         }
 #endif        
 
         printk(KERN_CRIT "unexpected debug exception\n");
         BUG();
-
-	get_debugreg(dr6, 6);
 
 	/* Filter out all the reserved bits which are preset to 1 */
 	dr6 &= ~DR6_RESERVED;
