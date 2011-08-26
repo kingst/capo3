@@ -23,11 +23,6 @@
 #include <asm/i387.h>
 #include <asm/debugreg.h>
 
-#ifdef CONFIG_RECORD_REPLAY
-#include <asm/replay.h>
-#endif
-
-
 struct kmem_cache *task_xstate_cachep;
 EXPORT_SYMBOL_GPL(task_xstate_cachep);
 
@@ -239,12 +234,6 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		 */
 		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
 	}
-
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY) ||
-           test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY))
-                rr_switch_to(prev_p, next_p);
-#endif
 
 	propagate_user_return_notify(prev_p, next_p);
 }

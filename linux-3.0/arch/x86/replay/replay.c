@@ -64,6 +64,7 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#include <asm/capo_perfct.h>
 
 #define NUM_REPLAY_MINOR 4
 
@@ -636,4 +637,12 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
         return 1;
 }
 
+/**********************************************************************************************/
+
+
+/************* Performance Monitoring Overflow Interrupt Handler ******************************/
+void capo_overflow_handler(struct perf_event * event, int unused, struct
+                perf_sample_data * data, struct pt_regs *regs) {
+
+}
 /**********************************************************************************************/
