@@ -48,7 +48,8 @@
 int perf_counter_init(void);
 void perf_counter_term(void);
 u64 perf_counter_read(void);
+void capo_perf_event_enable(void);
+void capo_perf_event_disable(void);
 extern void capo_overflow_handler(struct perf_event * event, int unused, 
                 struct perf_sample_data * data, struct pt_regs *regs);
-
 #endif

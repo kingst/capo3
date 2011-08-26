@@ -67,18 +67,20 @@ int perf_counter_init(void){
                 attr = kmalloc(sizeof(*attr), GFP_KERNEL);
                 memset(attr,0,sizeof(*attr));
                 attr->type = PERF_TYPE_HARDWARE;
+                //attr->type = PERF_TYPE_RAW;
                 attr->config = PERF_COUNT_HW_INSTRUCTIONS;
-                attr->config = ((raw << 63)|((long)PERF_TYPE_HARDWARE<<56));
                 attr->size = sizeof(*attr);
                 attr->sample_period = 0;
                 attr->disabled = 0;
                 attr->inherit = 0;
-                //attr->pinned = 1;     //TODO Not sure if we want this set or not yet
+                attr->pinned = 1;     //TODO Not sure if we want this set or not yet
                 //attr->exclusive = 1;
+                attr->freq = 0;
                 attr->exclude_user = 0; 
                 attr->exclude_kernel = 1;        
                 attr->exclude_hv = 1;         
                 attr->exclude_idle = 1;      
+                attr->inherit_stat = 1;
                 //attr->precise_ip = 3;       
                 //attr->wakeup_events = 10000;	  // wakeup every n events
         }
@@ -115,4 +117,14 @@ void perf_counter_term(void){
                 //release the pevent//
                 perf_event_release_kernel(pevent);
         }
+}
+
+void capo_perf_event_disable(void){
+        if(pevent != NULL)
+                perf_event_disable(pevent);
+}
+
+void capo_perf_event_enable(void){
+        if(pevent != NULL) 
+                perf_event_enable(pevent);
 }
