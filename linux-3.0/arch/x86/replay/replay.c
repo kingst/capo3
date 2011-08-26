@@ -324,8 +324,8 @@ void rr_syscall_enter(struct pt_regs *regs) {
                 get_debugreg(dr7, 7);
                 if(((dr7 & 0xf) != 0x1) && !rtcb->singlestep) {
                         get_debugreg(dr0, 0);
-                        printk(KERN_CRIT "############# resetting bp system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
-                               regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
+                        printk(KERN_CRIT "############# resetting tid %u system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
+                               rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
                         sphere_set_breakpoint(rtcb->chunk->ip);
                 }
 
@@ -510,6 +510,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
         rtcb->singlestep = 0;
+        rtcb->needs_chunk_start = current != tsk;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -628,7 +629,7 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                 regs->flags &= ~X86_EFLAGS_TF;
                 BUG_ON(dr6 & 1);
         } else if(dr6 & 1) {
-                printk(KERN_CRIT "****** breakpoint, num inst = %llu\n", perf_counter_read());
+                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, perf_counter_read());
                 sphere_chunk_end(current, 0);
                 if(regs->ip == rtcb->chunk->ip) {
                         // XXX FIXME I don't know if this will work if the next inst is a syscall

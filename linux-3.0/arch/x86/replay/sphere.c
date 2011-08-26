@@ -375,7 +375,7 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
         // this is used to detect shared memory threads, something we
         // don't handle yet
-        if(regs_syscallno(regs) == __NR_clone)
+        if((regs_syscallno(regs) == __NR_clone) && !sphere_is_chunk_replaying(current->rtcb->sphere))
                 BUG_ON((regs_first(regs) & CLONE_VM) == CLONE_VM);
 
         switch (regs_syscallno(regs)) {
@@ -440,7 +440,13 @@ void sphere_set_breakpoint(unsigned long ip) {
                 set_debugreg(0, 7);
                 set_debugreg(0, 0);
         } else {
-                printk(KERN_CRIT "setting the breakpoint at 0x%p\n", (void *) ip);
+                if(current->rtcb != NULL) {
+                        printk(KERN_CRIT "setting the breakpoint at 0x%p (tid=%u)\n", 
+                               (void *) ip, current->rtcb->thread_id);
+                } else {
+                        printk(KERN_CRIT "setting the breakpoint at 0x%p\n", 
+                               (void *) ip);
+                }
                 set_debugreg(ip, 0);
                 set_debugreg(0x1, 7);
         }
@@ -592,6 +598,7 @@ static int is_next_chunk(replay_sphere_t *sphere, uint32_t thread_id) {
 
         if(sphere->next_chunk != NULL)
                 return sphere->next_chunk->thread_id == thread_id;
+        
 
         return 0;
         
@@ -622,13 +629,10 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         mutex_lock(&sphere->mutex);
 
         rtcb->chunk = chunk;
-        if(chunk->ip == 0) {
-                // this had better be the last chunk
-                sphere_set_breakpoint(1);
-        } else {
+
+        if(current->rtcb == rtcb) {
                 sphere_set_breakpoint(chunk->ip);
         }
-        printk(KERN_CRIT "chunk begin performance counter value = %lld\n", perf_counter_read());
 }
 static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
@@ -845,8 +849,6 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
 
         mutex_lock(&sphere->mutex);
 
-        BUG_ON(sphere_is_chunk_replaying(sphere) && sphere->replay_first_execve);
-
         thread_id = sphere_next_thread_id(sphere);
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_create_event, thread_id, regs);
@@ -855,6 +857,7 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
         }
         // XXX FIXME we need some way to associate this with threads
         perf_counter_init();
+        
         mutex_unlock(&sphere->mutex);
 
         return thread_id;
@@ -926,22 +929,24 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         replay_event_locked(sphere, event, thread_id, regs);
         // this should only happen on the exit of the first execve in the first
         // thread that executes execve, gets chunking started        
-        if(sphere_is_chunk_replaying(sphere) && (sphere->replay_first_execve == 1)) {
-                sphere->replay_first_execve = 2;
-                sphere_chunk_begin_locked(sphere, current->rtcb);
+        if(sphere_is_chunk_replaying(sphere)) {
+                if(sphere->replay_first_execve == 1) {
+                        sphere->replay_first_execve = 2;
+                        sphere_chunk_begin_locked(sphere, current->rtcb);
+                } else if(current->rtcb->needs_chunk_start) {
+                        current->rtcb->needs_chunk_start = 0;
+                        sphere_chunk_begin_locked(sphere, current->rtcb);
+                }
         }
 
         mutex_unlock(&sphere->mutex);
 }
 
 void sphere_chunk_begin(struct task_struct *tsk) {
-        BUG();
-        /*
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);
         sphere_chunk_begin_locked(sphere, tsk->rtcb);
         mutex_unlock(&sphere->mutex);
-        */
 }
 void sphere_chunk_end(struct task_struct *tsk, int is_last) {
         replay_sphere_t *sphere = tsk->rtcb->sphere;

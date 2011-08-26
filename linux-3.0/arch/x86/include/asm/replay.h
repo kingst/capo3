@@ -120,6 +120,7 @@ typedef struct replay_thread_control_block {
         uint64_t send_sig;
         struct chunk_struct *chunk;
         int singlestep;
+        int needs_chunk_start;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
