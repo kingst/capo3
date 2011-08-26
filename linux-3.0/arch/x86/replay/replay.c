@@ -322,9 +322,6 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(rtcb->chunk) {
                 long dr7;
                 BUG_ON(get_debugreg(dr7, 7) != 0x1);
-                printk(KERN_CRIT "debug register set to 0x%p\n", (void *) native_get_debugreg(0));
-        } else {
-                printk(KERN_CRIT "syscall enter chunk == NULL\n");
         }
 
         // we clear send_sig here because we use it to prevent recording spurious
@@ -594,6 +591,8 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
+
+EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
