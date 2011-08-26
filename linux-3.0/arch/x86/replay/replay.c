@@ -321,8 +321,12 @@ void rr_syscall_enter(struct pt_regs *regs) {
 
         if(rtcb->chunk) {
                 long dr7;
-                BUG_ON(get_debugreg(dr7, 7) != 0x1);
-                printk(KERN_CRIT "debug register set to 0x%p\n", (void *) native_get_debugreg(0));
+                get_debugreg(dr7, 7);
+                if((dr7 & 0xf) != 0x1) {
+                        printk("system call %ld\n", regs->orig_ax);
+                        BUG();
+                }
+
         } else {
                 printk(KERN_CRIT "syscall enter chunk == NULL\n");
         }
@@ -532,10 +536,9 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
         if(prev_p->rtcb != NULL) {
                 chunk = prev_p->rtcb->chunk;
                 if(chunk != NULL) {
-                        BUG_ON(get_debugreg(dr7, 7) != 0x1);                        
+                        get_debugreg(dr7, 7);
+                        BUG_ON((dr7 & 0xf) != 0x1);                        
                         sphere_set_breakpoint(0);
-                } else {
-                        printk(KERN_CRIT "switchto chunk == null\n");
                 }
         }
         
@@ -543,7 +546,6 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
                 sphere = next_p->rtcb->sphere;
                 chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
-                printk(KERN_CRIT "switch_to chunk = 0x%p\n", chunk);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
                         sphere_set_breakpoint(chunk->ip);
                 }
@@ -594,6 +596,8 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
+
+EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
