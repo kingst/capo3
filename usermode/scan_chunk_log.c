@@ -52,12 +52,11 @@
 #include "util.h"
 
 int main(int argc, char *argv[]) {
-        replay_header_t header;
-        int ret;
-        struct execve_data *e;
+        chunk_t chunk;
+        int ret, idx;
 
         if(argc >= 3) {
-                fprintf(stderr, "Usage %s: [replay.log]\n", argv[0]);
+                fprintf(stderr, "Usage %s: [chunk.log]\n", argv[0]);
                 return 0;
         }
 
@@ -69,37 +68,25 @@ int main(int argc, char *argv[]) {
                 }
                 dup2(ret, STDIN_FILENO);
         }
-        
-        while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
-                assert(ret == sizeof(header));
-                printf("%u ", header.thread_id);
-                if(header.type == syscall_enter_event) {
-                        printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx\n",
-                               header.regs.orig_rax, header.regs.rdi);
-                } else if(header.type == syscall_exit_event) {
-                        printf("syscall_exit_event, syscall = %ld ret = %ld\n",
-                               header.regs.orig_rax, header.regs.rax);
-                } else if(header.type == thread_create_event) {
-                        printf("thread_create_event\n");
-                } else if(header.type == thread_exit_event) {
-                        printf("thread_exit_event\n");
-                } else if(header.type == instruction_event) {
-                        printf("instruction_event\n");
-                } else if(header.type == execve_event) {
-                        printf("execve_event\n");
-                        e = readExecveData();
-                } else if(header.type == copy_to_user_event) {
-                        printf("copy_to_user\n");
-                        readBuffer();
-                } else if(header.type == signal_event) {
-                        printf("signal\n");
-                } else {
-                        assert(0);
+
+        while(read_chunk(STDIN_FILENO, &chunk)) {
+                printf("processor id = %u\n", chunk.processor_id);
+                printf("thread id    = %u\n", chunk.thread_id);
+                printf("inst count   = %u\n", chunk.inst_count);
+                printf("succ vec     =");
+                for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                        printf(" 0x%02x", chunk.succ_vec[idx]);
                 }
-                
+                printf("\n");
+
+                printf("pred vec     =");
+                for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                        printf(" 0x%02x", chunk.pred_vec[idx]);
+                }
+                printf("\n");
+
+                printf("ip           = 0x%p\n", (void *) chunk.ip);
         }
-        
-        assert(ret == 0);
         
         return 0;
 }

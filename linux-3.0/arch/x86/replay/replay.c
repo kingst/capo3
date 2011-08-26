@@ -58,6 +58,7 @@
 #include <linux/ptrace.h>
 #include <linux/kfifo.h>
 #include <linux/file.h>
+#include <linux/syscalls.h>
 
 #include <trace/syscall.h>
 #include <trace/events/syscalls.h>
@@ -180,11 +181,7 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         if(file->private_data == NULL)
                 BUG();
 
-        if(cmd == REPLAY_IOC_START_CHUNKING) {
-                BUG_ON(current->rtcb == NULL);
-        } else {
-                BUG_ON(current->rtcb != NULL);
-        }
+        BUG_ON(current->rtcb != NULL);
 
         sphere = sfd->sphere;
 
@@ -200,6 +197,9 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 sphere_reset(sphere);
         } else if(cmd == REPLAY_IOC_START_CHUNKING) {
+                printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
+                ret = sphere_start_replaying(sphere);
+                rr_thread_create(current, sphere);
                 ret = sphere_start_chunking(sphere, current->rtcb);
         } else if(cmd == REPLAY_IOC_SET_CHUNK_LOG_FD) {
                 sfd->is_chunk_log_fd = 1;
@@ -316,6 +316,17 @@ void rr_syscall_enter(struct pt_regs *regs) {
 
         rtcb = current->rtcb;
 
+        if(!sphere_has_first_execve(rtcb->sphere))
+                return;
+
+        if(rtcb->chunk) {
+                long dr7;
+                BUG_ON(get_debugreg(dr7, 7) != 0x1);
+                printk(KERN_CRIT "debug register set to 0x%p\n", (void *) native_get_debugreg(0));
+        } else {
+                printk(KERN_CRIT "syscall enter chunk == NULL\n");
+        }
+
         // we clear send_sig here because we use it to prevent recording spurious
         // syscall_exit events that happen when we send signals on the syscall
         // return path
@@ -349,6 +360,10 @@ void rr_syscall_exit(struct pt_regs *regs) {
         sanity_check();
 
         rtcb = current->rtcb;
+
+        sphere_check_first_execve(rtcb->sphere, regs);
+        if(!sphere_has_first_execve(rtcb->sphere))
+                return;
 
         // This will skip syscall_exit calls in two situations.  First, when the
         // kernel restarts a system call (as a result of a signal).  Second, on 
@@ -478,7 +493,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         if(tsk->rtcb != NULL)
                 BUG();
 
-        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
         if(current == tsk)
                 disable_TSC();
         set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
@@ -491,7 +505,9 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
+        rtcb->stepping = 0;
         tsk->rtcb = rtcb;
+        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
 
 void rr_thread_exit(struct pt_regs *regs) {
@@ -503,15 +519,37 @@ void rr_thread_exit(struct pt_regs *regs) {
         clear_thread_flag(TIF_RECORD_REPLAY);
 
         sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
-        current->rtcb = NULL;
 
-        BUG_ON(rtcb->chunk != NULL);
+        //BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }
 
 void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
+        replay_sphere_t *sphere;
+        chunk_t *chunk;
+        long dr7;
+
+        if(prev_p->rtcb != NULL) {
+                chunk = prev_p->rtcb->chunk;
+                if(chunk != NULL) {
+                        BUG_ON(get_debugreg(dr7, 7) != 0x1);
+                        set_debugreg(0, 7);
+                        set_debugreg(0, 0);
+                } else {
+                        printk(KERN_CRIT "switchto chunk == null\n");
+                }
+        }
         
+        if(next_p->rtcb != NULL) {
+                sphere = next_p->rtcb->sphere;
+                chunk = next_p->rtcb->chunk;
+                BUG_ON(sphere == NULL);
+                printk(KERN_CRIT "switch_to chunk = 0x%p\n", chunk);
+                if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
+                        sphere_set_breakpoint(chunk->ip);
+                }
+        }
 }
 
 int rr_general_protection(struct pt_regs *regs) {
@@ -544,6 +582,9 @@ int rr_general_protection(struct pt_regs *regs) {
 
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
         sanity_check();
+        
+        if(!sphere_has_first_execve(current->rtcb->sphere))
+                return;
 
         // check for kernel addresses and return if we get one
         if(to_addr > PAGE_OFFSET)
@@ -554,6 +595,48 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
         } else {
                 //BUG();
         }
+}
+
+int rr_do_debug(struct pt_regs *regs, long error_code) {
+        rtcb_t *rtcb = current->rtcb;
+        unsigned long dr6;
+
+        if(rtcb == NULL)
+                return 0;
+
+        if(rtcb->chunk == NULL)
+                return 0;
+
+        get_debugreg(dr6, 6);
+        if(dr6 & (1<<14)) {
+                printk(KERN_CRIT "single step\n");
+                BUG();
+        } else {
+                BUG_ON((dr6 & 1) == 0);
+                printk(KERN_CRIT "breakpoint\n");
+                sphere_set_breakpoint(0);
+                sphere_chunk_end(current);
+        }
+        set_debugreg(0, 6);
+
+        /*
+        if(rtcb->stepping) {
+                printk(KERN_CRIT "stepping ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
+                set_debugreg(rtcb->chunk->ip, 0);
+                set_debugreg(0x1, 7);
+                rtcb->stepping = 0;
+                regs->flags &= ~X86_EFLAGS_TF;
+        } else {
+                BUG_ON(regs->ip != rtcb->chunk->ip);
+                printk(KERN_CRIT "breakpoint ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
+                set_debugreg(0, 7);
+                set_debugreg(0, 0);
+                rtcb->stepping = 1;
+                regs->flags |= X86_EFLAGS_TF;
+        }
+        */
+
+        return 1;
 }
 
 /**********************************************************************************************/

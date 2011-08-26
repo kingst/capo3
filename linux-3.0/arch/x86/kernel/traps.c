@@ -470,6 +470,7 @@ void restart_nmi(void)
 /* May run on IST stack. */
 dotraplinkage void __kprobes do_int3(struct pt_regs *regs, long error_code)
 {
+        printk(KERN_CRIT "do_int3\n");
 #ifdef CONFIG_KGDB_LOW_LEVEL_TRAP
 	if (kgdb_ll_trap(DIE_INT3, "int3", regs, error_code, 3, SIGTRAP)
 			== NOTIFY_STOP)
@@ -547,6 +548,17 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	int user_icebp = 0;
 	unsigned long dr6;
 	int si_code;
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_thread_flag(TIF_RECORD_REPLAY)) {
+                if(rr_do_debug(regs, error_code)) {
+                        return;
+                }
+        }
+#endif        
+
+        printk(KERN_CRIT "unexpected debug exception\n");
+        BUG();
 
 	get_debugreg(dr6, 6);
 

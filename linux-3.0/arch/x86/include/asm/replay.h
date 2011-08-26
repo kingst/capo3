@@ -28,6 +28,7 @@ typedef struct chunk_struct {
         uint32_t succ_vec[NUM_CHUNK_PROC];
         uint32_t pred_vec[NUM_CHUNK_PROC];
         unsigned long ip;
+        unsigned long next_ip;
 } chunk_t;
 
 #ifdef __KERNEL__
@@ -91,6 +92,9 @@ typedef struct replay_sphere {
         // these variables are only accessed by usermode
         struct mutex mutex;
         atomic_t fd_count;
+        int has_fifo_reader;
+        int has_fifo_writer;
+        int has_chunk_fifo_writer;
 
         // these variables are only accessed by rr threads
         int fifo_head_ctu_buf;
@@ -107,6 +111,7 @@ typedef struct replay_sphere {
         cond_t chunk_next_record_cond;
         struct chunk_struct *next_chunk;
         int is_chunk_replay;
+        
 } replay_sphere_t;
 
 typedef struct replay_thread_control_block {
@@ -115,6 +120,7 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
+        int stepping;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
@@ -126,6 +132,7 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);
 int rr_deliver_signal(int signr, struct pt_regs *regs);
+int rr_do_debug(struct pt_regs *regs, long error_code);
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt
@@ -161,9 +168,13 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs);
 
+int sphere_has_first_execve(replay_sphere_t *sphere);
+void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
+
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);
 void sphere_chunk_end(struct task_struct *tsk);
+void sphere_set_breakpoint(unsigned long ip);
 
 #endif
 
