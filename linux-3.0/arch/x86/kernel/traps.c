@@ -563,9 +563,6 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
         }
 #endif        
 
-        printk(KERN_CRIT "unexpected debug exception\n");
-        BUG();
-
 	/* Filter out all the reserved bits which are preset to 1 */
 	dr6 &= ~DR6_RESERVED;
 
