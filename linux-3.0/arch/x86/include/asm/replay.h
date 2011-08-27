@@ -110,7 +110,10 @@ typedef struct replay_sphere {
         cond_t chunk_next_record_cond;
         struct chunk_struct *next_chunk;
         int is_chunk_replay;
-        
+        int *next_tickets;
+        atomic_t *cur_tickets;
+        wait_queue_head_t tickets_wait_queue;
+        cond_t cur_tickets_updated;
 } replay_sphere_t;
 
 typedef struct replay_thread_control_block {
@@ -119,6 +122,8 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
+        uint32_t my_ticket;
+        int is_in_chunk_begin;
         int singlestep;
         int needs_chunk_start;
 } rtcb_t;
@@ -127,7 +132,8 @@ void rr_syscall_enter(struct pt_regs *regs);
 void rr_syscall_exit(struct pt_regs *regs);
 void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
 void rr_thread_exit(struct pt_regs *regs);
-void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p);
+void rr_switch_from(struct task_struct *prev_p);
+void rr_switch_to(struct task_struct *next_p);
 int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);

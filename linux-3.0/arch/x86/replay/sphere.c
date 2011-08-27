@@ -608,6 +608,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
+        rtcb->is_in_chunk_begin = 1;
         BUG_ON(rtcb->chunk != NULL);
         while(!is_next_chunk(sphere, rtcb->thread_id))
                 cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
@@ -620,27 +621,48 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         me = chunk->processor_id;
         cond_broadcast(&sphere->chunk_next_record_cond);
 
+        // we should make sure that chunks from the 
+        // same recorded cpu execute in the order 
+        // that they show up in the chunks log.
+        // to enforce this, we use a simple ticketing mechanism
+        rtcb->my_ticket = sphere->next_tickets[me];
+        sphere->next_tickets[me] += 1;
+
         mutex_unlock(&sphere->mutex);
+
+        // wait until I see my ticket
+        while(atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket)
+                wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) == rtcb->my_ticket));
+        if (atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket) 
+                BUG();
+
+        // now wait on tokens from predecessor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
                 for(i = 0; i < chunk->pred_vec[idx]; i++) {
                         down(&(sphere->proc_sem[idx][me]));
                 }
         }
+
         mutex_lock(&sphere->mutex);
 
         rtcb->chunk = chunk;
-        printk("chunk begin ip = 0x%p\n", chunk->ip);
-
+        printk("chunk begin ip = 0x%p\n", (void *)chunk->ip);
         if(current->rtcb == rtcb) {
                 sphere_set_breakpoint(chunk->ip);
         }
+        rtcb->is_in_chunk_begin = 0;
 }
+
 static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
         chunk = rtcb->chunk;
         me = chunk->processor_id;
+
+        // signal the next ticket
+        atomic_inc(&sphere->cur_tickets[me]);
+        wake_up_all(&sphere->tickets_wait_queue);
 
         mutex_unlock(&sphere->mutex);
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
@@ -718,13 +740,26 @@ replay_sphere_t *sphere_alloc(void) {
         sphere->has_fifo_writer = 0;
         sphere->has_chunk_fifo_writer = 0;
 
+        // tickets
+        sphere->next_tickets = kmalloc(NUM_CHUNK_PROC*sizeof(int), GFP_KERNEL);
+        sphere->cur_tickets = kmalloc(NUM_CHUNK_PROC*sizeof(atomic_t), GFP_KERNEL);
+        init_waitqueue_head(&sphere->tickets_wait_queue);
+        cond_init(&sphere->cur_tickets_updated);
+        for(i = 0; i < NUM_CHUNK_PROC; i++) {
+            sphere->next_tickets[i] = 0;
+            atomic_set(&sphere->cur_tickets[i], 0);
+        }
+
         mutex_init(&sphere->mutex);
 
         return sphere;
 }
 
 void sphere_reset(replay_sphere_t *sphere) {
+        int i;
+
         mutex_lock(&sphere->mutex);
+
         if(sphere->num_threads > 0)
                 BUG();
         atomic_set(&sphere->state, idle);
@@ -749,6 +784,12 @@ void sphere_reset(replay_sphere_t *sphere) {
         // XXX FIXME we should do something to reset the proc_sem semaphores
         // or throw a bug if there are any threads waiting on them or they
         // have values
+
+        // reset tickets
+        for(i = 0; i < NUM_CHUNK_PROC; i++) {
+            sphere->next_tickets[i] = 0;
+            atomic_set(&sphere->cur_tickets[i], 0);
+        }
 
         mutex_unlock(&sphere->mutex);
 }
@@ -948,6 +989,7 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         sphere_chunk_begin_locked(sphere, tsk->rtcb);
         mutex_unlock(&sphere->mutex);
 }
+
 void sphere_chunk_end(struct task_struct *tsk, int is_last) {
         replay_sphere_t *sphere = tsk->rtcb->sphere;
         mutex_lock(&sphere->mutex);

@@ -51,10 +51,6 @@
 #include <asm/syscalls.h>
 #include <asm/debugreg.h>
 
-#ifdef CONFIG_RECORD_REPLAY
-#include <asm/replay.h>
-#endif
-
 asmlinkage extern void ret_from_fork(void);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
@@ -486,12 +482,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	if (unlikely(task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT ||
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
-
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY) ||
-           test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY))
-                rr_switch_to(prev_p, next_p);
-#endif
 
 	/*
 	 * Preload the FPU context, now that we've determined that the
