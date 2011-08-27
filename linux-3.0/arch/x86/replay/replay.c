@@ -319,6 +319,7 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(!sphere_has_first_execve(rtcb->sphere))
                 return;
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(rtcb->chunk) {
                 long dr7, dr0;
                 get_debugreg(dr7, 7);
@@ -328,8 +329,8 @@ void rr_syscall_enter(struct pt_regs *regs) {
                                rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
                         sphere_set_breakpoint(rtcb->chunk->ip);
                 }
-
         }
+#endif
 
         // we clear send_sig here because we use it to prevent recording spurious
         // syscall_exit events that happen when we send signals on the syscall
@@ -512,7 +513,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->singlestep = 0;
         rtcb->needs_chunk_start = current != tsk;
         rtcb->my_ticket = 0;
-        rtcb->is_in_chunk_begin = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -536,10 +536,12 @@ void rr_thread_exit(struct pt_regs *regs) {
 }
 
 void rr_switch_from(struct task_struct *prev_p) {
-        chunk_t *chunk;
-        long dr7;
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
+                long dr7;
+                chunk_t *chunk;
+
                 chunk = prev_p->rtcb->chunk;
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
@@ -547,13 +549,16 @@ void rr_switch_from(struct task_struct *prev_p) {
                         sphere_set_breakpoint(0);
                 }
         }
+#endif
+
 }
 
 void rr_switch_to(struct task_struct *next_p) {
-        replay_sphere_t *sphere;
-        chunk_t *chunk;
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(next_p->rtcb != NULL) {
+                replay_sphere_t *sphere;
+                chunk_t *chunk;
                 sphere = next_p->rtcb->sphere;
                 chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
@@ -561,6 +566,8 @@ void rr_switch_to(struct task_struct *next_p) {
                         sphere_set_breakpoint(chunk->ip);
                 }
         }
+#endif
+
 }
 
 int rr_general_protection(struct pt_regs *regs) {
@@ -609,11 +616,10 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
-
 EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 static int num_inst = 0;
-
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
@@ -688,13 +694,17 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         return 1;
 }
+#endif
 
 /**********************************************************************************************/
 
 
 /************* Performance Monitoring Overflow Interrupt Handler ******************************/
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void capo_overflow_handler(struct perf_event * event, int unused, struct
                 perf_sample_data * data, struct pt_regs *regs) {
 
 }
+#endif
 /**********************************************************************************************/
+

@@ -123,7 +123,6 @@ typedef struct replay_thread_control_block {
         uint64_t send_sig;
         struct chunk_struct *chunk;
         uint32_t my_ticket;
-        int is_in_chunk_begin;
         int singlestep;
         int needs_chunk_start;
 } rtcb_t;
@@ -138,7 +137,9 @@ int rr_general_protection(struct pt_regs *regs);
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
 void rr_send_signal(int signo);
 int rr_deliver_signal(int signr, struct pt_regs *regs);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 int rr_do_debug(struct pt_regs *regs, long error_code);
+#endif
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt
@@ -180,7 +181,9 @@ void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);
 void sphere_chunk_end(struct task_struct *tsk, int is_last);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip);
+#endif
 
 #endif
 

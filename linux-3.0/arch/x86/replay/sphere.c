@@ -431,7 +431,7 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
-
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip) {
         // XX FIXME make sure that this debug regiter is not being used and that we aren't
         // trampling someone else's use of the other debug registers
@@ -451,6 +451,7 @@ void sphere_set_breakpoint(unsigned long ip) {
                 set_debugreg(0x1, 7);
         }
 }
+#endif
 
 static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *header) {
         BUG_ON(header->type != syscall_exit_event);        
@@ -608,8 +609,8 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
-        rtcb->is_in_chunk_begin = 1;
         BUG_ON(rtcb->chunk != NULL);
+
         while(!is_next_chunk(sphere, rtcb->thread_id))
                 cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
 
@@ -646,11 +647,13 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         mutex_lock(&sphere->mutex);
 
         rtcb->chunk = chunk;
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         printk("chunk begin ip = 0x%p\n", (void *)chunk->ip);
         if(current->rtcb == rtcb) {
                 sphere_set_breakpoint(chunk->ip);
         }
-        rtcb->is_in_chunk_begin = 0;
+#endif
 }
 
 static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
@@ -918,8 +921,10 @@ void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_r
         if(sphere->num_threads == 0)
                 atomic_set(&sphere->state, done);
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         // XXX FIXME we need some way to associate this with a thread
         perf_counter_term();
+#endif
 
         mutex_unlock(&sphere->mutex);
 
@@ -973,7 +978,9 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                 if(sphere->replay_first_execve == 1) {
                         sphere->replay_first_execve = 2;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
+                #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
                         perf_counter_init();
+                #endif
                 } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;
                         sphere_chunk_begin_locked(sphere, current->rtcb);

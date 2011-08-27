@@ -551,7 +551,7 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 
 	get_debugreg(dr6, 6);
 
-#ifdef CONFIG_RECORD_REPLAY
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(test_thread_flag(TIF_RECORD_REPLAY)) {
                 // XXX FIXME there might be issues with dr6
                 preempt_conditional_sti(regs);
@@ -559,7 +559,7 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
                         preempt_conditional_cli(regs);
                         return;
                 }
-		preempt_conditional_cli(regs);
+                preempt_conditional_cli(regs);
         }
 #endif        
 
