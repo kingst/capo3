@@ -283,14 +283,14 @@ MODULE_VERSION(REPLAY_VERSION);
 
 
 /*********************************** Callbacks from kernel ************************************/
-static void sanity_check(void) {
-        if(current->rtcb == NULL)
+static void sanity_check(struct task_struct *tsk) {
+        if(tsk->rtcb == NULL)
                 BUG();
 
-        if(current->rtcb->sphere == NULL)
+        if(tsk->rtcb->sphere == NULL)
                 BUG();
 
-        if(!sphere_is_recording_replaying(current->rtcb->sphere))
+        if(!sphere_is_recording_replaying(tsk->rtcb->sphere))
                 BUG();
 }
 
@@ -312,7 +312,7 @@ static int get_signr(rtcb_t *rtcb) {
 void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
 
-        sanity_check();
+        sanity_check(current);
 
         rtcb = current->rtcb;
 
@@ -361,7 +361,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
         int signr;
         rtcb_t *rtcb;
 
-        sanity_check();
+        sanity_check(current);
 
         rtcb = current->rtcb;
 
@@ -417,7 +417,7 @@ void rr_syscall_exit(struct pt_regs *regs) {
 void rr_send_signal(int signo) {
         unsigned long syscallno;
         struct pt_regs *regs;
-        sanity_check();
+        sanity_check(current);
 
         regs = task_pt_regs(current);
 
@@ -511,6 +511,8 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->chunk = NULL;
         rtcb->singlestep = 0;
         rtcb->needs_chunk_start = current != tsk;
+        rtcb->my_ticket = 0;
+        rtcb->is_in_chunk_begin = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -518,7 +520,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
 void rr_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
 
-        sanity_check();
+        sanity_check(current);
 
         if(sphere_is_chunk_replaying(rtcb->sphere))
                 sphere_chunk_end(current, 1);
@@ -562,7 +564,7 @@ int rr_general_protection(struct pt_regs *regs) {
         uint16_t opcode;
         long low, high;
 
-        sanity_check();
+        sanity_check(current);
 
         if(copy_from_user(&opcode, (void *) regs_ip(regs), sizeof(opcode)))
                 return 0;
@@ -588,7 +590,7 @@ int rr_general_protection(struct pt_regs *regs) {
 }
 
 void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
-        sanity_check();
+        sanity_check(current);
         
         if(!sphere_has_first_execve(current->rtcb->sphere))
                 return;

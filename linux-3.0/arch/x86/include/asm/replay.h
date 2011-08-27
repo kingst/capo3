@@ -110,7 +110,10 @@ typedef struct replay_sphere {
         cond_t chunk_next_record_cond;
         struct chunk_struct *next_chunk;
         int is_chunk_replay;
-        
+        int *next_tickets;
+        atomic_t *cur_tickets;
+        wait_queue_head_t tickets_wait_queue;
+        cond_t cur_tickets_updated;
 } replay_sphere_t;
 
 typedef struct replay_thread_control_block {
@@ -119,6 +122,8 @@ typedef struct replay_thread_control_block {
         uint64_t def_sig;
         uint64_t send_sig;
         struct chunk_struct *chunk;
+        uint32_t my_ticket;
+        int is_in_chunk_begin;
         int singlestep;
         int needs_chunk_start;
 } rtcb_t;
