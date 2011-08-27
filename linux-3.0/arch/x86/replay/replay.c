@@ -535,8 +535,7 @@ void rr_thread_exit(struct pt_regs *regs) {
         kfree(rtcb);
 }
 
-void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
-        replay_sphere_t *sphere;
+void rr_switch_from(struct task_struct *prev_p) {
         chunk_t *chunk;
         long dr7;
 
@@ -548,7 +547,12 @@ void rr_switch_to(struct task_struct *prev_p, struct task_struct *next_p) {
                         sphere_set_breakpoint(0);
                 }
         }
-        
+}
+
+void rr_switch_to(struct task_struct *next_p) {
+        replay_sphere_t *sphere;
+        chunk_t *chunk;
+
         if(next_p->rtcb != NULL) {
                 sphere = next_p->rtcb->sphere;
                 chunk = next_p->rtcb->chunk;

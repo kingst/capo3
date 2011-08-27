@@ -83,6 +83,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+#endif
+
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
  * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
@@ -4314,6 +4318,13 @@ need_resched:
 		rq->curr = next;
 		++*switch_count;
 
+#ifdef CONFIG_RECORD_REPLAY
+        BUG_ON(current != prev);
+        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
+            rr_switch_from(current);
+        }
+#endif
+
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
 		 * The context switch have flipped the stack from under us
@@ -4331,6 +4342,12 @@ need_resched:
 	preempt_enable_no_resched();
 	if (need_resched())
 		goto need_resched;
+
+#ifdef CONFIG_RECORD_REPLAY
+        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
+            rr_switch_to(current);
+        }
+#endif
 }
 EXPORT_SYMBOL(schedule);
 
