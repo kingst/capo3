@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
                 return 0;
         }
 
-        fd = open(argv[1], O_RDWR | O_CREAT | O_TRUNC);
+        fd = open(argv[1], O_RDWR | O_CREAT | O_TRUNC, 0600);
         if(fd < 0) {
                 fprintf(stderr, "could not open file %s\n", argv[1]);
                 return 0;

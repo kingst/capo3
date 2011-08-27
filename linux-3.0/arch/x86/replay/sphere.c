@@ -629,6 +629,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         mutex_lock(&sphere->mutex);
 
         rtcb->chunk = chunk;
+        printk("chunk begin ip = 0x%p\n", chunk->ip);
 
         if(current->rtcb == rtcb) {
                 sphere_set_breakpoint(chunk->ip);
@@ -649,7 +650,7 @@ static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         }
         mutex_lock(&sphere->mutex);
 
-        printk(KERN_CRIT "chunk done\n");
+        printk(KERN_CRIT "chunk done (inst_count = %u\n", rtcb->chunk->inst_count);
         rtcb->chunk = NULL;
         kfree(chunk);
 }

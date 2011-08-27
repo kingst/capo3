@@ -611,7 +611,8 @@ static int num_inst = 0;
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
-        uint64_t ni;
+        uint64_t ni, inst;
+        int step = 0;
 
         if(rtcb == NULL)
                 return 0;
@@ -633,11 +634,22 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                 BUG_ON(dr6 & 1);
         } else if(dr6 & 1) {
                 ni = perf_counter_read();
-                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, ni - num_inst);
+                inst = ni - num_inst;
+
+                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", 
+                       rtcb->thread_id, inst);
                 num_inst = ni;
-                //printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", rtcb->thread_id, 0);
-                sphere_chunk_end(current, 0);
-                if(regs->ip == rtcb->chunk->ip) {
+
+                if(inst >= rtcb->chunk->inst_count) {
+                        sphere_chunk_end(current, 0);
+                        if(regs->ip == rtcb->chunk->ip) {
+                                step = 1;
+                        }
+                } else {
+                        step = 1;
+                }
+
+                if(step) {
                         // XXX FIXME I don't know if this will work if the next inst is a syscall
                         printk(KERN_CRIT "single stepping........\n");
                         rtcb->singlestep = 1;
