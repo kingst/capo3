@@ -71,9 +71,14 @@
 #include <asm/hw_breakpoint.h>
 #include <asm/debugreg.h>
 
+#ifdef CONFIG_MRR
+#include "mrr_if.h"
+#endif
+#include <asm/mrr/simics_if.h>
+
 #define LOG_BUFFER_SIZE (8*1024*1024)
 #define CHUNK_BUFFER_SIZE (16*1024)
-#define PRINT_DEBUG 1
+#define PRINT_DEBUG 0
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -609,8 +614,13 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         BUG_ON(rtcb->chunk != NULL);
 
-        while(!is_next_chunk(sphere, rtcb->thread_id))
+        my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
+        while(!is_next_chunk(sphere, rtcb->thread_id)) {
+                my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
                 cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
+        }
+        my_magic_message_int("got the next chunk entry", rtcb->thread_id);
+        my_magic_message_int("next chunk entry size:", sphere->next_chunk->inst_count);
 
         BUG_ON((sphere->next_chunk == NULL) || (sphere->next_chunk->thread_id != rtcb->thread_id));
 
@@ -624,23 +634,27 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         // same recorded cpu execute in the order 
         // that they show up in the chunks log.
         // to enforce this, we use a simple ticketing mechanism
+        my_magic_message_int("getting my ticket", rtcb->thread_id);
         rtcb->my_ticket = sphere->next_tickets[me];
         sphere->next_tickets[me] += 1;
 
         mutex_unlock(&sphere->mutex);
 
         // wait until I see my ticket
+        my_magic_message_int("waiting for my ticket", rtcb->thread_id);
         while(atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket)
                 wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) == rtcb->my_ticket));
         if (atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket) 
                 BUG();
 
         // now wait on tokens from predecessor chunks
+        my_magic_message_int("before semaphores", rtcb->thread_id);
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
                 for(i = 0; i < chunk->pred_vec[idx]; i++) {
                         down(&(sphere->proc_sem[idx][me]));
                 }
         }
+        my_magic_message_int("after semaphores", rtcb->thread_id);
 
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
@@ -840,6 +854,7 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
 
         mutex_lock(&sphere->mutex);
         ret = start_record_replay(sphere, replaying);
+        my_magic_message("started replaying");
         mutex_unlock(&sphere->mutex);
 
         return ret;
@@ -850,6 +865,7 @@ int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         mutex_lock(&sphere->mutex);
         BUG_ON(!sphere_is_replaying(sphere));
+        my_magic_message("started chunking");
         sphere->is_chunk_replay = 1;
         rtcb->chunk = NULL;
         mutex_unlock(&sphere->mutex);
@@ -940,14 +956,22 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
+#ifdef CONFIG_MRR        
+        int start_mrr = 0;
+#endif
+
         BUG_ON(sphere != current->rtcb->sphere);
 
         mutex_lock(&sphere->mutex);
+
         replay_event_locked(sphere, event, thread_id, regs);
         // this should only happen on the exit of the first execve in the first
         // thread that executes execve, gets chunking started        
         if(sphere_is_chunk_replaying(sphere)) {
                 if(sphere->replay_first_execve == 1) {
+                #ifdef CONFIG_MRR        
+                        start_mrr = 1;
+                #endif
                         sphere->replay_first_execve = 2;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
@@ -966,6 +990,12 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         }
 
         mutex_unlock(&sphere->mutex);
+
+#ifdef CONFIG_MRR
+        if (start_mrr) {
+                mrr_switch_to(current);
+        }
+#endif
 }
 
 void sphere_chunk_begin(struct task_struct *tsk) {
