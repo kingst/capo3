@@ -598,6 +598,11 @@ static int is_next_chunk(replay_sphere_t *sphere, uint32_t thread_id) {
         
 }
 
+/*
+ * Do not put any chunk-counting stuff in this function.
+ * It is meant to be used for just grabbing the next chunk from the log and
+ * waiting for predecessors.
+ */
 static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
@@ -638,40 +643,10 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         }
 
         mutex_lock(&sphere->mutex);
-
         rtcb->chunk = chunk;
-
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *)chunk->ip);
-        if(current->rtcb == rtcb) {
-                sphere_set_breakpoint(chunk->ip);
-        }
-#endif
+        printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *) chunk->ip);
 }
 
-static void sphere_chunk_end_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
-        chunk_t *chunk;
-        uint32_t idx, i, me;
-
-        chunk = rtcb->chunk;
-        me = chunk->processor_id;
-
-        // signal the next ticket
-        atomic_inc(&sphere->cur_tickets[me]);
-        wake_up_all(&sphere->tickets_wait_queue);
-
-        mutex_unlock(&sphere->mutex);
-        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
-                for(i = 0; i < chunk->succ_vec[idx]; i++) {
-                        up(&(sphere->proc_sem[me][idx]));
-                }
-        }
-        mutex_lock(&sphere->mutex);
-
-        printk(KERN_CRIT "chunk done (inst_count = %u\n", rtcb->chunk->inst_count);
-        rtcb->chunk = NULL;
-        kfree(chunk);
-}
 
 /**********************************************************************************************/
 
@@ -972,12 +947,16 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                         sphere->replay_first_execve = 2;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
                         perf_counter_init();                        
                         current->rtcb->perf_count = perf_counter_read();
                 #endif
                 } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
+                #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
+                #endif
                 }
         }
 
@@ -991,14 +970,33 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         mutex_unlock(&sphere->mutex);
 }
 
-void sphere_chunk_end(struct task_struct *tsk, int is_last) {
-        replay_sphere_t *sphere = tsk->rtcb->sphere;
-        mutex_lock(&sphere->mutex);
-        sphere_chunk_end_locked(sphere, tsk->rtcb);
-        if(!is_last) {
-                sphere_chunk_begin_locked(sphere, tsk->rtcb);
+/*
+ * this function does not need to lock the sphere.
+ * all of its functionality is thread-local. 
+ * Please keep it this way.
+ */
+void sphere_chunk_end(struct task_struct *tsk) {
+        uint32_t idx, i, me;
+        rtcb_t *rtcb = tsk->rtcb;
+        replay_sphere_t *sphere = rtcb->sphere;
+        chunk_t *chunk = rtcb->chunk;
+
+        me = chunk->processor_id;
+
+        // signal the next ticket
+        atomic_inc(&sphere->cur_tickets[me]);
+        wake_up_all(&sphere->tickets_wait_queue);
+
+        // signal the successor chunks
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                for(i = 0; i < chunk->succ_vec[idx]; i++) {
+                        up(&(sphere->proc_sem[me][idx]));
+                }
         }
-        mutex_unlock(&sphere->mutex);
+
+        printk(KERN_CRIT "chunk done (inst_count = %u\n", rtcb->chunk->inst_count);
+        rtcb->chunk = NULL;
+        kfree(chunk);
 }
 
 void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs) {
