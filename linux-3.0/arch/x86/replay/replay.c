@@ -512,6 +512,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->chunk = NULL;
         rtcb->needs_chunk_start = current != tsk;
         rtcb->my_ticket = 0;
+        rtcb->perf_count = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -534,18 +535,44 @@ void rr_thread_exit(struct pt_regs *regs) {
         kfree(rtcb);
 }
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
+        u64 perf_count;
+        u32 num_inst;
+        u32 rem = 0;
+
+
+        perf_count = perf_counter_read();
+        num_inst = perf_count - rtcb->perf_count;
+        if(num_inst > chunk->inst_count) {
+                rem = num_inst - chunk->inst_count;
+                printk(KERN_CRIT "warning, counted %u too many instructions in chunk\n", rem);
+                chunk->inst_count = 0;
+        } else {
+                chunk->inst_count -= num_inst;
+        }
+        rtcb->perf_count = perf_count;
+
+        return rem;
+}
+#endif
+
 void rr_switch_from(struct task_struct *prev_p) {
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
                 long dr7;
                 chunk_t *chunk;
+                uint32_t rem;
 
                 chunk = prev_p->rtcb->chunk;
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
                         BUG_ON((dr7 & 0xf) != 0x1);                        
                         sphere_set_breakpoint(0);
+                        rem = update_perf_count(prev_p->rtcb, chunk);
+                        if(rem)
+                                printk(KERN_CRIT "BUG!!!!! chunk done and scheduling out, rem = %u\n", rem);
                 }
         }
 #endif
@@ -563,6 +590,7 @@ void rr_switch_to(struct task_struct *next_p) {
                 BUG_ON(sphere == NULL);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
                         sphere_set_breakpoint(chunk->ip);
+                        next_p->rtcb->perf_count = perf_counter_read();
                 }
         }
 #endif
@@ -618,11 +646,10 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
 EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-static int num_inst = 0;
+
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
-        uint64_t ni, inst;
         int step = 0;
 
         if(rtcb == NULL)
@@ -636,21 +663,20 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         if(dr6 & 1) {
                 BUG_ON(regs->ip != rtcb->chunk->ip);
-                ni = perf_counter_read();
-                inst = ni - num_inst;
+                update_perf_count(rtcb, rtcb->chunk);
 
-                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", 
-                       rtcb->thread_id, inst);
+                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst left = %u\n", 
+                       rtcb->thread_id, rtcb->chunk->inst_count);
 
-                if(inst >= rtcb->chunk->inst_count) {
+                if(rtcb->chunk->inst_count == 0) {
                         sphere_chunk_end(current, 0);
+                        // this chunk will refer to the new chunk that just got loaded
                         if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;
                         }
-                        num_inst = ni;
                 } else {
-                        printk(KERN_CRIT "chunk num inst = %llu, current chunk %llu\n",
-                               rtcb->chunk->inst_count, inst);
+                        printk(KERN_CRIT "chunk num inst = %u\n",
+                               rtcb->chunk->inst_count);
                         step = 1;
                 }
 
@@ -659,7 +685,6 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                         // software can execute the instruction pointed
                         // to by the breakpoint without causing a breakpoint
                         // exception
-                        printk(KERN_CRIT "setting RF......\n");
                         regs->flags |= X86_EFLAGS_RF;
                 }
         } else {

@@ -440,13 +440,6 @@ void sphere_set_breakpoint(unsigned long ip) {
                 set_debugreg(0, 7);
                 set_debugreg(0, 0);
         } else {
-                if(current->rtcb != NULL) {
-                        printk(KERN_CRIT "setting the breakpoint at 0x%p (tid=%u)\n", 
-                               (void *) ip, current->rtcb->thread_id);
-                } else {
-                        printk(KERN_CRIT "setting the breakpoint at 0x%p\n", 
-                               (void *) ip);
-                }
                 set_debugreg(ip, 0);
                 set_debugreg(0x1, 7);
         }
@@ -649,7 +642,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         rtcb->chunk = chunk;
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        printk("chunk begin ip = 0x%p\n", (void *)chunk->ip);
+        printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *)chunk->ip);
         if(current->rtcb == rtcb) {
                 sphere_set_breakpoint(chunk->ip);
         }
@@ -979,7 +972,8 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                         sphere->replay_first_execve = 2;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-                        perf_counter_init();
+                        perf_counter_init();                        
+                        current->rtcb->perf_count = perf_counter_read();
                 #endif
                 } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;

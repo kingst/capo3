@@ -124,6 +124,7 @@ typedef struct replay_thread_control_block {
         struct chunk_struct *chunk;
         uint32_t my_ticket;
         int needs_chunk_start;
+        uint64_t perf_count;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
