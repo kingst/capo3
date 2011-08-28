@@ -45,11 +45,11 @@
 #ifndef _PERFCT_H_
 #define _PERFCT_H_
 
-int perf_counter_init(void);
-void perf_counter_term(void);
-u64 perf_counter_read(void);
-void capo_perf_event_enable(void);
-void capo_perf_event_disable(void);
+struct perf_event perf_counter_init(struct task_struct *tsk);
+void perf_counter_term(struct perf_event *pevent);
+u64 perf_counter_read(struct perf_event *pevent);
+void capo_perf_event_enable(struct perf_event *pevent);
+void capo_perf_event_disable(struct perf_event *pevent);
 extern void capo_overflow_handler(struct perf_event * event, int unused, 
                 struct perf_sample_data * data, struct pt_regs *regs);
 #endif

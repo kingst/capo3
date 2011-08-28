@@ -50,18 +50,16 @@
 #include <linux/perf_event.h>
 
 #include "asm/capo_perfct.h"
-
-struct perf_event *pevent;
+#include "asm/replay.h"
 
 static struct perf_event_attr *attr = NULL;
 
 /*
  * This function sets up the performance counter registers to record. 
  */
-int perf_counter_init(void){
+struct perf_event perf_counter_init(struct task_struct *tsk){
         int cpu;
-        struct task_struct *tsk = current;
-        long raw = 0;
+        struct perf_event *pevent;
 
         if(attr == NULL) {
                 attr = kmalloc(sizeof(*attr), GFP_KERNEL);
@@ -91,40 +89,53 @@ int perf_counter_init(void){
                         (perf_overflow_handler_t) capo_overflow_handler);
 
         if (IS_ERR(pevent)){
-                return PTR_ERR(pevent);
+                BUG();
+                printk(KERN_CRIT "***** PERFCT: Failed to create kernel counter");
+                //return PTR_ERR(pevent);
+                return NULL;
         }
 
         if (pevent->state != PERF_EVENT_STATE_ACTIVE) {
-                printk(KERN_CRIT "Failed to enable kernel counter");
+                printk(KERN_CRIT "***** PERFCT: Failed to enable kernel counter");
                 kfree(attr);
                 attr=NULL;
                 perf_event_release_kernel(pevent);
-                return -EBUSY;
+                BUG();
+                //return -EBUSY;
+                return NULL;
         }
 
-        return 0;
+        return pevent;
 }
 
-u64 perf_counter_read(void){
+u64 perf_counter_read(struct perf_event *pevent){
         u64 enabled = 0; u64  running = 0;
-        return perf_event_read_value(pevent, &enabled, &running); 
+        if(pevent != NULL){
+                //return local64_read(&pevent->count);
+                return perf_event_read_value(pevent, &enabled, &running); 
+        }else{
+                printk(KERN_CRIT "***** PERFCT: event in task structure is null\n");
+                BUG();
+                return -1; //FIXME figure out how to handle this case
+        }
 }
 
-void perf_counter_term(void){
+void perf_counter_term(struct perf_event *pevent){
         if(attr != NULL) {
                 kfree(attr);
                 attr=NULL;
-                //release the pevent//
-                perf_event_release_kernel(pevent);
         }
+        //release the performance event//
+        if(pevent != NULL)
+                perf_event_release_kernel(pevent);
 }
 
-void capo_perf_event_disable(void){
+void capo_perf_event_disable(struct perf_event *pevent){
         if(pevent != NULL)
                 perf_event_disable(pevent);
 }
 
-void capo_perf_event_enable(void){
+void capo_perf_event_enable(struct perf_event *pevent){
         if(pevent != NULL) 
                 perf_event_enable(pevent);
 }
