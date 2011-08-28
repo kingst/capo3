@@ -79,6 +79,11 @@
 
 #ifdef CONFIG_RECORD_REPLAY
 #include <asm/replay.h>
+static rr_thread_create_cb_t rr_thread_create_cb = NULL;
+void set_rr_thread_create_cb(rr_thread_create_cb_t cb) {
+    rr_thread_create_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_thread_create_cb);
 #endif
 
 /*
@@ -284,8 +289,9 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 		goto out;
 
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_ti_thread_flag(task_thread_info(orig), TIF_RECORD_REPLAY))
-                rr_thread_create(tsk, orig->rtcb->sphere);
+        if(test_ti_thread_flag(task_thread_info(orig), TIF_RECORD_REPLAY) && (NULL != rr_thread_create_cb)) {
+                rr_thread_create_cb(tsk, orig->rtcb->sphere);
+        }
 #endif
 
 	setup_thread_stack(tsk, orig);

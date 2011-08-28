@@ -59,6 +59,11 @@
 
 #ifdef CONFIG_RECORD_REPLAY
 #include <asm/replay.h>
+static rr_thread_exit_cb_t rr_thread_exit_cb = NULL;
+void set_rr_thread_exit_cb(rr_thread_exit_cb_t cb) {
+    rr_thread_exit_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_thread_exit_cb);
 #endif
 
 
@@ -931,8 +936,9 @@ NORET_TYPE void do_exit(long code)
 	tracehook_report_exit(&code);
 
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY))
-                rr_thread_exit(task_pt_regs(tsk));
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_thread_exit_cb)) {
+                rr_thread_exit_cb(task_pt_regs(tsk));
+        }
 #endif
 
 	validate_creds_for_do_exit(tsk);

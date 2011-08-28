@@ -85,6 +85,16 @@
 
 #ifdef CONFIG_RECORD_REPLAY
 #include <asm/replay.h>
+static rr_switch_from_cb_t rr_switch_from_cb = NULL;
+void set_rr_switch_from_cb(rr_switch_from_cb_t cb) {
+    rr_switch_from_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_switch_from_cb);
+static rr_switch_to_cb_t rr_switch_to_cb = NULL;
+void set_rr_switch_to_cb(rr_switch_to_cb_t cb) {
+    rr_switch_to_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_switch_to_cb);
 #endif
 
 /*
@@ -4320,8 +4330,8 @@ need_resched:
 
 #ifdef CONFIG_RECORD_REPLAY
         BUG_ON(current != prev);
-        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
-            rr_switch_from(current);
+        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_from_cb)) {
+            rr_switch_from_cb(current);
         }
 #endif
 
@@ -4344,8 +4354,8 @@ need_resched:
 		goto need_resched;
 
 #ifdef CONFIG_RECORD_REPLAY
-        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY)) {
-            rr_switch_to(current);
+        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_to_cb)) {
+            rr_switch_to_cb(current);
         }
 #endif
 }

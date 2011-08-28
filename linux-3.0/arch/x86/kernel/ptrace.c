@@ -36,6 +36,17 @@
 
 #ifdef CONFIG_RECORD_REPLAY
 #include <asm/replay.h>
+static rr_syscall_enter_cb_t rr_syscall_enter_cb = NULL;
+void set_rr_syscall_enter_cb(rr_syscall_enter_cb_t cb) {
+    rr_syscall_enter_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_syscall_enter_cb);
+
+static rr_syscall_exit_cb_t rr_syscall_exit_cb = NULL;
+void set_rr_syscall_exit_cb(rr_syscall_exit_cb_t cb) {
+    rr_syscall_exit_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_syscall_exit_cb);
 #endif
 
 #include "tls.h"
@@ -1410,8 +1421,9 @@ long syscall_trace_enter(struct pt_regs *regs)
 	}
         
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY))
-                rr_syscall_enter(regs);
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_syscall_enter_cb)) {
+                rr_syscall_enter_cb(regs);
+        }
 #endif
 
 	return ret ?: regs->orig_ax;
@@ -1439,8 +1451,9 @@ void syscall_trace_leave(struct pt_regs *regs)
 		tracehook_report_syscall_exit(regs, step);
 
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY))
-                rr_syscall_exit(regs);
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_syscall_exit_cb)) {
+                rr_syscall_exit_cb(regs);
+        }
 #endif
 
 }

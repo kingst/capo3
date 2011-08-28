@@ -8,6 +8,17 @@
 #include <linux/module.h>
 #include <asm/uaccess.h>
 
+
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+rr_copy_to_user_cb_t rr_copy_to_user_cb = NULL;
+void set_rr_copy_to_user_cb(rr_copy_to_user_cb_t cb) {
+    rr_copy_to_user_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_copy_to_user_cb);
+#endif
+
+
 /*
  * Copy a null terminated string from userspace.
  */

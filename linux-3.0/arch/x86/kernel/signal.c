@@ -36,9 +36,15 @@
 #include <asm/syscalls.h>
 
 #include <asm/sigframe.h>
+#include <linux/module.h>
 
 #ifdef CONFIG_RECORD_REPLAY
 #include <asm/replay.h>
+static rr_deliver_signal_cb_t rr_deliver_signal_cb = NULL;
+void set_rr_deliver_signal_cb(rr_deliver_signal_cb_t cb) {
+    rr_deliver_signal_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_deliver_signal_cb);
 #endif
 
 #define _BLOCKABLE (~(sigmask(SIGKILL) | sigmask(SIGSTOP)))
@@ -791,8 +797,9 @@ static void do_signal(struct pt_regs *regs)
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 
 #ifdef CONFIG_RECORD_REPLAY
-        if((signr > 0) && test_thread_flag(TIF_RECORD_REPLAY))
-                signr = rr_deliver_signal(signr, regs);
+        if((signr > 0) && test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_deliver_signal_cb)) {
+                signr = rr_deliver_signal_cb(signr, regs);
+        }
 #endif
 
 	if (signr > 0) {

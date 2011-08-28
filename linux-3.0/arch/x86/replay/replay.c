@@ -81,6 +81,423 @@ typedef struct sphere_file_data {
 #define REPLAY_VERSION	"0.3"
 
 
+/*********************************** Callbacks from kernel ************************************/
+static void sanity_check(struct task_struct *tsk) {
+        if(tsk->rtcb == NULL)
+                BUG();
+
+        if(tsk->rtcb->sphere == NULL)
+                BUG();
+
+        if(!sphere_is_recording_replaying(tsk->rtcb->sphere))
+                BUG();
+}
+
+static int get_signr(rtcb_t *rtcb) {
+        int idx;
+        uint64_t def_sig = rtcb->def_sig;
+
+        for(idx = 0; idx < 64; idx++) {
+                if(def_sig & (1<<idx)) {
+                        rtcb->def_sig = (def_sig & ~(1<<idx));
+                        return idx;
+                }
+        }
+
+        BUG();
+        return -1;       
+}
+
+static void rr_syscall_enter(struct pt_regs *regs) {
+        rtcb_t *rtcb;
+
+        sanity_check(current);
+
+        rtcb = current->rtcb;
+
+        if(!sphere_has_first_execve(rtcb->sphere))
+                return;
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+        if(rtcb->chunk) {
+                long dr7, dr0;
+                get_debugreg(dr7, 7);
+                if((dr7 & 0xf) != 0x1) {
+                        get_debugreg(dr0, 0);
+                        printk(KERN_CRIT "############# resetting tid %u system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
+                               rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
+                        sphere_set_breakpoint(rtcb->chunk->ip);
+                }
+        }
+#endif
+
+        // we clear send_sig here because we use it to prevent recording spurious
+        // syscall_exit events that happen when we send signals on the syscall
+        // return path
+        if(rtcb->send_sig)
+                rtcb->send_sig = 0;
+
+        if(sphere_is_recording(rtcb->sphere)) {
+                record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+        } else {
+                replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+        }
+}
+
+/*
+static void print_stack(struct pt_regs *regs) {
+        unsigned long arg;
+        unsigned long start;
+
+        for(start = regs->sp; start < STACK_TOP; start += sizeof(arg)) {
+                if(copy_from_user(&arg, (void __user *) start, sizeof(arg)) == 0)
+                        printk(KERN_CRIT "%p: 0x%08lx\n", (void *) start, arg);
+        }
+}
+*/
+
+static void rr_send_signal(int signo) {
+        unsigned long syscallno;
+        struct pt_regs *regs;
+        sanity_check(current);
+
+        regs = task_pt_regs(current);
+
+        if(sphere_is_recording(current->rtcb->sphere)) {
+                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
+                syscallno = regs_syscallno(regs);
+                set_regs_syscallno(regs, signo);
+                record_header(current->rtcb->sphere, signal_event, 
+                              current->rtcb->thread_id, regs);
+                set_regs_syscallno(regs, syscallno);
+        } else {
+                BUG();
+        }
+}
+
+
+static void rr_syscall_exit(struct pt_regs *regs) {
+        uint64_t mask = 1;
+        int signr;
+        rtcb_t *rtcb;
+
+        sanity_check(current);
+
+        rtcb = current->rtcb;
+
+        sphere_check_first_execve(rtcb->sphere, regs);
+        if(!sphere_has_first_execve(rtcb->sphere))
+                return;
+
+        // This will skip syscall_exit calls in two situations.  First, when the
+        // kernel restarts a system call (as a result of a signal).  Second, on 
+        // an sigreturn system call.  Because we re-execute the sigreturn
+        // system call then it should be ok to do this.
+        if(((long) regs_syscallno(regs)) < 0)
+                return;
+
+        // the logic here deals with signal delivery and the interactions with
+        // the syscall_exit callback mechanism.  The way it works is that the
+        // kernel will call this callback after a system call and then after it
+        // returns the kernel checks for pending signals.  If there are any it
+        // will deal with them and call the syscall exit handler again.  Our
+        // goal is to log the signal event before the syscall exit event, and
+        // to log only one syscall exit event.
+        //
+        // To deal with this we don't log syscall exits when there is a
+        // pending signal because we know that this callback will be called
+        // again.  If the def_sig var is set, the do_signal function set it
+        // before squashing the signal, so we log the syscall exit and signal
+        // here, then we set send_sig.  Send_sig tells do_signal to actually
+        // deliver the signal, and it is not cleared until the next syscall
+        // enter to prevent duplicate logging of syscall exits.
+        //
+        // the only thing I am unsure about is if there is a race condition
+        // where you can recieve a pending signal after logging the system call
+        // exit but before checking for any pending signals.
+        if(sphere_is_recording(rtcb->sphere)) {
+                if(rtcb->def_sig) {
+                        signr = get_signr(rtcb);
+                        mask <<= signr;
+                        rtcb->def_sig &= ~mask;
+                        BUG_ON(rtcb->send_sig != 0);
+                        rtcb->send_sig |= mask;
+                        rr_send_signal(signr);
+                        send_sig(signr, current, 1);
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
+                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+                }
+        } else {
+                if(rtcb->send_sig == 0)
+                        replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
+        }
+}
+
+static int rr_deliver_signal(int signr, struct pt_regs *regs) {
+        int async = 0;
+        uint64_t mask;
+
+        if(signr < 0)
+                return signr;
+
+        switch(signr) {
+                case SIGTERM: 
+                case SIGHUP: 
+                case SIGINT: 
+                case SIGQUIT: 
+                case SIGKILL: 
+                case SIGUSR1: 
+                case SIGUSR2: 
+                case SIGALRM: 
+                case SIGVTALRM:
+                case SIGPROF:
+                case SIGCHLD:
+                case SIGCONT:
+                case SIGSTOP:
+                case SIGTSTP:
+                case SIGTTIN:
+                case SIGTTOU:
+                case SIGIO: // also SIGPOLL -> 29
+                case SIGURG:
+                case SIGPIPE:
+                case SIGSTKFLT:
+                case SIGPWR:
+                case SIGSYS:
+                case SIGXCPU: 
+                case SIGXFSZ:
+                case SIGWINCH:
+                        async = 1;
+                        break;
+        }
+
+        // check if this is an async signal
+        if(!async)
+                return signr;
+
+        BUG_ON(signr >= SIGRTMAX);        
+        mask = 1;
+        mask <<= signr;
+        if((current->rtcb->send_sig & mask) != 0) {
+                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
+                return signr;
+        } else {
+                if(sphere_is_recording(current->rtcb->sphere))
+                        current->rtcb->def_sig |= mask;
+                printk(KERN_CRIT "defer signal\n");
+                return -1;
+        }
+
+        return signr;
+}
+
+static void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
+        rtcb_t *rtcb;
+        struct pt_regs *regs = task_pt_regs(tsk);
+        
+        if(tsk->rtcb != NULL)
+                BUG();
+
+        if(current == tsk)
+                disable_TSC();
+        set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
+
+        rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
+        memset(rtcb, 0, sizeof(rtcb_t));
+
+        rtcb->sphere = sphere;
+        rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
+        rtcb->def_sig = 0;
+        rtcb->send_sig = 0;
+        rtcb->chunk = NULL;
+        rtcb->needs_chunk_start = current != tsk;
+        rtcb->my_ticket = 0;
+        rtcb->perf_count = 0;
+        rtcb->pevent = NULL;
+        tsk->rtcb = rtcb;
+        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
+}
+
+static void rr_thread_exit(struct pt_regs *regs) {
+
+        rtcb_t *rtcb = current->rtcb;
+        sanity_check(current);
+
+        if(sphere_is_chunk_replaying(rtcb->sphere)) {
+                sphere_chunk_end(current);
+        }
+
+        current->rtcb = NULL;
+        clear_thread_flag(TIF_RECORD_REPLAY);
+        sphere_thread_exit(rtcb, regs);
+
+        //BUG_ON(rtcb->chunk != NULL);
+
+        kfree(rtcb);
+}
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
+        u64 perf_count;
+        u32 num_inst;
+        u32 rem = 0;
+
+        perf_count = perf_counter_read(rtcb->pevent);
+        num_inst = perf_count - rtcb->perf_count;
+        if(num_inst > chunk->inst_count) {
+                rem = num_inst - chunk->inst_count;
+                printk(KERN_CRIT "warning, counted %u too many instructions in chunk\n", rem);
+                chunk->inst_count = 0;
+        } else {
+                chunk->inst_count -= num_inst;
+        }
+        rtcb->perf_count = perf_count;
+
+        return rem;
+}
+#endif
+
+static void rr_switch_from(struct task_struct *prev_p) {
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+        if(prev_p->rtcb != NULL) {
+                long dr7;
+                chunk_t *chunk = prev_p->rtcb->chunk;
+
+                if(chunk != NULL) {
+                        get_debugreg(dr7, 7);
+                        BUG_ON((dr7 & 0xf) != 0x1);                        
+                        sphere_set_breakpoint(0);
+                }
+        }
+#endif
+}
+
+static void rr_switch_to(struct task_struct *next_p) {
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+        if(next_p->rtcb != NULL) {
+                replay_sphere_t *sphere = next_p->rtcb->sphere;
+                chunk_t *chunk = next_p->rtcb->chunk;
+                BUG_ON(sphere == NULL);
+                if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
+                        task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
+                        sphere_set_breakpoint(chunk->ip);
+                }
+        }
+#endif
+}
+
+static int rr_general_protection(struct pt_regs *regs) {
+        rtcb_t *rtcb = current->rtcb;
+        uint16_t opcode;
+        long low, high;
+
+        sanity_check(current);
+
+        if(copy_from_user(&opcode, (void *) regs_ip(regs), sizeof(opcode)))
+                return 0;
+
+        // this code is for rdtsc emulation
+        if(opcode != 0x310f)
+                return 0;
+        if(sphere_is_recording(rtcb->sphere)) {
+                __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+                
+                regs->ax = low;
+                regs->dx = high;
+                regs->ip += 2;
+                
+                record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+        } else {                
+                replay_event(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
+                // make sure we can trap if the next instruction is a chunk boundary
+                regs->flags &= ~X86_EFLAGS_RF;
+        }
+
+        return 1;
+}
+
+static void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
+        sanity_check(current);
+        
+        if(!sphere_has_first_execve(current->rtcb->sphere))
+                return;
+
+        // check for kernel addresses and return if we get one
+        if(to_addr > PAGE_OFFSET)
+                return;
+
+        if(sphere_is_recording(current->rtcb->sphere)) {
+                record_copy_to_user(current->rtcb->sphere, to_addr, buf, len);
+        } else {
+                //BUG();
+        }
+}
+EXPORT_SYMBOL_GPL(rr_copy_to_user);
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+
+static int rr_do_debug(struct pt_regs *regs, long error_code) {
+        rtcb_t *rtcb = current->rtcb;
+        unsigned long dr6;
+        int step = 0;
+        u32 inst_count;
+        u64 perf_count;
+
+        if(rtcb == NULL)
+                return 0;
+
+        if(rtcb->chunk == NULL)
+                return 0;
+        get_debugreg(dr6, 6);
+
+        BUG_ON(!user_mode(regs));
+
+        if(dr6 & 1) {
+                BUG_ON(regs->ip != rtcb->chunk->ip);
+                perf_count = perf_counter_read(rtcb->pevent);
+                inst_count = perf_count - rtcb->perf_count;
+
+                printk(KERN_CRIT "****** breakpoint (tid=%u), inst count = %u %u\n", 
+                       rtcb->thread_id, rtcb->chunk->inst_count, inst_count);
+
+                if(inst_count >= rtcb->chunk->inst_count) {
+                        if(inst_count > rtcb->chunk->inst_count) {
+                                printk(KERN_CRIT "went past by %u inst\n",
+                                       inst_count - rtcb->chunk->inst_count);
+                        }
+                        rtcb->perf_count = perf_count;
+                        sphere_chunk_end(current);
+                        sphere_chunk_begin(current);
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
+                        // this chunk will refer to the new chunk that just got loaded
+                        if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
+                                step = 1;
+                        }
+                } else {
+                        step = 1;
+                }
+
+                if(step) {
+                        // setting the RF here will make sure that the
+                        // software can execute the instruction pointed
+                        // to by the breakpoint without causing a breakpoint
+                        // exception
+                        regs->flags |= X86_EFLAGS_RF;
+                }
+        } else {
+                BUG();
+        }
+
+        set_debugreg(0, 6);
+
+        return 1;
+}
+#endif
+
+/**********************************************************************************************/
+
+
 /******************************** Driver interface functions ***********************************/
 
 static int replay_open(struct inode *inode, struct file *file) {
@@ -213,7 +630,21 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 /**********************************************************************************************/
 
+
 /********************************* Initialization functions ***********************************/
+
+void set_rr_syscall_enter_cb(rr_syscall_enter_cb_t cb);
+void set_rr_syscall_exit_cb(rr_syscall_exit_cb_t cb);
+void set_rr_thread_create_cb(rr_thread_create_cb_t cb);
+void set_rr_thread_exit_cb(rr_thread_exit_cb_t cb);
+void set_rr_switch_from_cb(rr_switch_from_cb_t cb);
+void set_rr_switch_to_cb(rr_switch_to_cb_t cb);
+void set_rr_general_protection_cb(rr_general_protection_cb_t cb);
+void set_rr_copy_to_user_cb(rr_copy_to_user_cb_t cb);
+void set_rr_deliver_signal_cb(rr_deliver_signal_cb_t cb);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+void set_rr_do_debug_cb(rr_do_debug_cb_t cb);
+#endif
 
 static int __init replay_init(void) {
         int idx;
@@ -251,12 +682,40 @@ static int __init replay_init(void) {
                 }
         }
 
-	return 0;
+        // kernel call-backs
+        set_rr_syscall_enter_cb(rr_syscall_enter);
+        set_rr_syscall_exit_cb(rr_syscall_exit);
+        set_rr_thread_create_cb(rr_thread_create);
+        set_rr_thread_exit_cb(rr_thread_exit);
+        set_rr_switch_from_cb(rr_switch_from);
+        set_rr_switch_to_cb(rr_switch_to);
+        set_rr_general_protection_cb(rr_general_protection);
+        set_rr_copy_to_user_cb(rr_copy_to_user);
+        set_rr_deliver_signal_cb(rr_deliver_signal);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+        set_rr_do_debug_cb(rr_do_debug);
+#endif
+
+    	return 0;
 }
 
 static void __exit replay_exit(void) {
         int idx;
         printk(KERN_INFO "exiting replay module\n");
+
+        // kernel call-backs
+        set_rr_syscall_enter_cb(NULL);
+        set_rr_syscall_exit_cb(NULL);
+        set_rr_thread_create_cb(NULL);
+        set_rr_thread_exit_cb(NULL);
+        set_rr_switch_from_cb(NULL);
+        set_rr_switch_to_cb(NULL);
+        set_rr_general_protection_cb(NULL);
+        set_rr_copy_to_user_cb(NULL);
+        set_rr_deliver_signal_cb(NULL);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+        set_rr_do_debug_cb(NULL);
+#endif
 
         if(!IS_ERR(replay_class)) {
                 for(idx = 0; idx < NUM_REPLAY_MINOR; idx++)
@@ -271,6 +730,7 @@ static void __exit replay_exit(void) {
         printk(KERN_INFO "done exiting replay module\n");
 }
 
+
 module_init(replay_init);
 module_exit(replay_exit);
 
@@ -278,405 +738,6 @@ MODULE_AUTHOR("Sam King");
 MODULE_DESCRIPTION("Provides control of replay hardware.");
 MODULE_LICENSE("BSD");
 MODULE_VERSION(REPLAY_VERSION);
-
-/**********************************************************************************************/
-
-
-/*********************************** Callbacks from kernel ************************************/
-static void sanity_check(struct task_struct *tsk) {
-        if(tsk->rtcb == NULL)
-                BUG();
-
-        if(tsk->rtcb->sphere == NULL)
-                BUG();
-
-        if(!sphere_is_recording_replaying(tsk->rtcb->sphere))
-                BUG();
-}
-
-static int get_signr(rtcb_t *rtcb) {
-        int idx;
-        uint64_t def_sig = rtcb->def_sig;
-
-        for(idx = 0; idx < 64; idx++) {
-                if(def_sig & (1<<idx)) {
-                        rtcb->def_sig = (def_sig & ~(1<<idx));
-                        return idx;
-                }
-        }
-
-        BUG();
-        return -1;       
-}
-
-void rr_syscall_enter(struct pt_regs *regs) {
-        rtcb_t *rtcb;
-
-        sanity_check(current);
-
-        rtcb = current->rtcb;
-
-        if(!sphere_has_first_execve(rtcb->sphere))
-                return;
-
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        if(rtcb->chunk) {
-                long dr7, dr0;
-                get_debugreg(dr7, 7);
-                if((dr7 & 0xf) != 0x1) {
-                        get_debugreg(dr0, 0);
-                        printk(KERN_CRIT "############# resetting tid %u system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
-                               rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
-                        sphere_set_breakpoint(rtcb->chunk->ip);
-                }
-        }
-#endif
-
-        // we clear send_sig here because we use it to prevent recording spurious
-        // syscall_exit events that happen when we send signals on the syscall
-        // return path
-        if(rtcb->send_sig)
-                rtcb->send_sig = 0;
-
-        if(sphere_is_recording(rtcb->sphere)) {
-                record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
-        } else {
-                replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
-        }
-}
-
-/*
-static void print_stack(struct pt_regs *regs) {
-        unsigned long arg;
-        unsigned long start;
-
-        for(start = regs->sp; start < STACK_TOP; start += sizeof(arg)) {
-                if(copy_from_user(&arg, (void __user *) start, sizeof(arg)) == 0)
-                        printk(KERN_CRIT "%p: 0x%08lx\n", (void *) start, arg);
-        }
-}
-*/
-
-void rr_syscall_exit(struct pt_regs *regs) {
-        uint64_t mask = 1;
-        int signr;
-        rtcb_t *rtcb;
-
-        sanity_check(current);
-
-        rtcb = current->rtcb;
-
-        sphere_check_first_execve(rtcb->sphere, regs);
-        if(!sphere_has_first_execve(rtcb->sphere))
-                return;
-
-        // This will skip syscall_exit calls in two situations.  First, when the
-        // kernel restarts a system call (as a result of a signal).  Second, on 
-        // an sigreturn system call.  Because we re-execute the sigreturn
-        // system call then it should be ok to do this.
-        if(((long) regs_syscallno(regs)) < 0)
-                return;
-
-        // the logic here deals with signal delivery and the interactions with
-        // the syscall_exit callback mechanism.  The way it works is that the
-        // kernel will call this callback after a system call and then after it
-        // returns the kernel checks for pending signals.  If there are any it
-        // will deal with them and call the syscall exit handler again.  Our
-        // goal is to log the signal event before the syscall exit event, and
-        // to log only one syscall exit event.
-        //
-        // To deal with this we don't log syscall exits when there is a
-        // pending signal because we know that this callback will be called
-        // again.  If the def_sig var is set, the do_signal function set it
-        // before squashing the signal, so we log the syscall exit and signal
-        // here, then we set send_sig.  Send_sig tells do_signal to actually
-        // deliver the signal, and it is not cleared until the next syscall
-        // enter to prevent duplicate logging of syscall exits.
-        //
-        // the only thing I am unsure about is if there is a race condition
-        // where you can recieve a pending signal after logging the system call
-        // exit but before checking for any pending signals.
-        if(sphere_is_recording(rtcb->sphere)) {
-                if(rtcb->def_sig) {
-                        signr = get_signr(rtcb);
-                        mask <<= signr;
-                        rtcb->def_sig &= ~mask;
-                        BUG_ON(rtcb->send_sig != 0);
-                        rtcb->send_sig |= mask;
-                        rr_send_signal(signr);
-                        send_sig(signr, current, 1);
-                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
-                } else if((rtcb->send_sig == 0) && !test_thread_flag(TIF_SIGPENDING)) {
-                        record_header(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
-                }
-        } else {
-                if(rtcb->send_sig == 0)
-                        replay_event(rtcb->sphere, syscall_exit_event, rtcb->thread_id, regs);
-        }
-}
-
-void rr_send_signal(int signo) {
-        unsigned long syscallno;
-        struct pt_regs *regs;
-        sanity_check(current);
-
-        regs = task_pt_regs(current);
-
-        if(sphere_is_recording(current->rtcb->sphere)) {
-                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
-                syscallno = regs_syscallno(regs);
-                set_regs_syscallno(regs, signo);
-                record_header(current->rtcb->sphere, signal_event, 
-                              current->rtcb->thread_id, regs);
-                set_regs_syscallno(regs, syscallno);
-        } else {
-                BUG();
-        }
-}
-
-int rr_deliver_signal(int signr, struct pt_regs *regs) {
-        int async = 0;
-        uint64_t mask;
-
-        if(signr < 0)
-                return signr;
-
-        switch(signr) {
-                case SIGTERM: 
-                case SIGHUP: 
-                case SIGINT: 
-                case SIGQUIT: 
-                case SIGKILL: 
-                case SIGUSR1: 
-                case SIGUSR2: 
-                case SIGALRM: 
-                case SIGVTALRM:
-                case SIGPROF:
-                case SIGCHLD:
-                case SIGCONT:
-                case SIGSTOP:
-                case SIGTSTP:
-                case SIGTTIN:
-                case SIGTTOU:
-                case SIGIO: // also SIGPOLL -> 29
-                case SIGURG:
-                case SIGPIPE:
-                case SIGSTKFLT:
-                case SIGPWR:
-                case SIGSYS:
-                case SIGXCPU: 
-                case SIGXFSZ:
-                case SIGWINCH:
-                        async = 1;
-                        break;
-        }
-
-        // check if this is an async signal
-        if(!async)
-                return signr;
-
-        BUG_ON(signr >= SIGRTMAX);        
-        mask = 1;
-        mask <<= signr;
-        if((current->rtcb->send_sig & mask) != 0) {
-                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
-                return signr;
-        } else {
-                if(sphere_is_recording(current->rtcb->sphere))
-                        current->rtcb->def_sig |= mask;
-                printk(KERN_CRIT "defer signal\n");
-                return -1;
-        }
-
-        return signr;
-}
-
-void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
-        rtcb_t *rtcb;
-        struct pt_regs *regs = task_pt_regs(tsk);
-        
-        if(tsk->rtcb != NULL)
-                BUG();
-
-        if(current == tsk)
-                disable_TSC();
-        set_ti_thread_flag(task_thread_info(tsk), TIF_NOTSC);
-
-        rtcb = kmalloc(sizeof(rtcb_t), GFP_KERNEL);
-        memset(rtcb, 0, sizeof(rtcb_t));
-
-        rtcb->sphere = sphere;
-        rtcb->thread_id = sphere_thread_create(rtcb->sphere, regs);
-        rtcb->def_sig = 0;
-        rtcb->send_sig = 0;
-        rtcb->chunk = NULL;
-        rtcb->needs_chunk_start = current != tsk;
-        rtcb->my_ticket = 0;
-        rtcb->perf_count = 0;
-        rtcb->pevent = NULL;
-        tsk->rtcb = rtcb;
-        set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
-}
-
-void rr_thread_exit(struct pt_regs *regs) {
-        rtcb_t *rtcb = current->rtcb;
-
-        sanity_check(current);
-
-        if(sphere_is_chunk_replaying(rtcb->sphere)) {
-                sphere_chunk_end(current);
-        }
-
-        current->rtcb = NULL;
-        clear_thread_flag(TIF_RECORD_REPLAY);
-
-        sphere_thread_exit(rtcb, regs);
-
-        //BUG_ON(rtcb->chunk != NULL);
-
-        kfree(rtcb);
-}
-
-void rr_switch_from(struct task_struct *prev_p) {
-
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        if(prev_p->rtcb != NULL) {
-                long dr7;
-                chunk_t *chunk = prev_p->rtcb->chunk;
-
-                if(chunk != NULL) {
-                        get_debugreg(dr7, 7);
-                        BUG_ON((dr7 & 0xf) != 0x1);                        
-                        sphere_set_breakpoint(0);
-                }
-        }
-#endif
-
-}
-
-void rr_switch_to(struct task_struct *next_p) {
-
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        if(next_p->rtcb != NULL) {
-                replay_sphere_t *sphere = next_p->rtcb->sphere;
-                chunk_t *chunk = next_p->rtcb->chunk;
-                BUG_ON(sphere == NULL);
-                if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
-                        task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
-                        sphere_set_breakpoint(chunk->ip);
-                }
-        }
-#endif
-
-}
-
-int rr_general_protection(struct pt_regs *regs) {
-        rtcb_t *rtcb = current->rtcb;
-        uint16_t opcode;
-        long low, high;
-
-        sanity_check(current);
-
-        if(copy_from_user(&opcode, (void *) regs_ip(regs), sizeof(opcode)))
-                return 0;
-
-        // this code is for rdtsc emulation
-        if(opcode != 0x310f)
-                return 0;
-        if(sphere_is_recording(rtcb->sphere)) {
-                __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
-                
-                regs->ax = low;
-                regs->dx = high;
-                regs->ip += 2;
-                
-                record_header(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
-        } else {                
-                replay_event(rtcb->sphere, instruction_event, rtcb->thread_id, regs);
-                // make sure we can trap if the next instruction is a chunk boundary
-                regs->flags &= ~X86_EFLAGS_RF;
-        }
-
-        return 1;
-}
-
-void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
-        sanity_check(current);
-        
-        if(!sphere_has_first_execve(current->rtcb->sphere))
-                return;
-
-        // check for kernel addresses and return if we get one
-        if(to_addr > PAGE_OFFSET)
-                return;
-
-        if(sphere_is_recording(current->rtcb->sphere)) {
-                record_copy_to_user(current->rtcb->sphere, to_addr, buf, len);
-        } else {
-                //BUG();
-        }
-}
-EXPORT_SYMBOL_GPL(rr_copy_to_user);
-
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-
-int rr_do_debug(struct pt_regs *regs, long error_code) {
-        rtcb_t *rtcb = current->rtcb;
-        unsigned long dr6;
-        int step = 0;
-        u32 inst_count;
-        u64 perf_count;
-
-        if(rtcb == NULL)
-                return 0;
-
-        if(rtcb->chunk == NULL)
-                return 0;
-        get_debugreg(dr6, 6);
-
-        BUG_ON(!user_mode(regs));
-
-        if(dr6 & 1) {
-                BUG_ON(regs->ip != rtcb->chunk->ip);
-                perf_count = perf_counter_read(rtcb->pevent);
-                inst_count = perf_count - rtcb->perf_count;
-
-                printk(KERN_CRIT "****** breakpoint (tid=%u), inst count = %u %u\n", 
-                       rtcb->thread_id, rtcb->chunk->inst_count, inst_count);
-
-                if(inst_count >= rtcb->chunk->inst_count) {
-                        if(inst_count > rtcb->chunk->inst_count) {
-                                printk(KERN_CRIT "went past by %u inst\n",
-                                       inst_count - rtcb->chunk->inst_count);
-                        }
-                        rtcb->perf_count = perf_count;
-                        sphere_chunk_end(current);
-                        sphere_chunk_begin(current);
-                        sphere_set_breakpoint(current->rtcb->chunk->ip);
-                        // this chunk will refer to the new chunk that just got loaded
-                        if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
-                                step = 1;
-                        }
-                } else {
-                        step = 1;
-                }
-
-                if(step) {
-                        // setting the RF here will make sure that the
-                        // software can execute the instruction pointed
-                        // to by the breakpoint without causing a breakpoint
-                        // exception
-                        regs->flags |= X86_EFLAGS_RF;
-                }
-        } else {
-                BUG();
-        }
-
-        set_debugreg(0, 6);
-
-        return 1;
-}
-#endif
 
 /**********************************************************************************************/
 

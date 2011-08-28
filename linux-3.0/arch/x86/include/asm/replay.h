@@ -130,19 +130,20 @@ typedef struct replay_thread_control_block {
         struct perf_event *pevent;
 } rtcb_t;
 
-void rr_syscall_enter(struct pt_regs *regs);
-void rr_syscall_exit(struct pt_regs *regs);
-void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere);
-void rr_thread_exit(struct pt_regs *regs);
-void rr_switch_from(struct task_struct *prev_p);
-void rr_switch_to(struct task_struct *next_p);
-int rr_general_protection(struct pt_regs *regs);
-void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
-void rr_send_signal(int signo);
-int rr_deliver_signal(int signr, struct pt_regs *regs);
+// kernel callback function types
+typedef void (*rr_syscall_enter_cb_t)(struct pt_regs *regs);
+typedef void (*rr_syscall_exit_cb_t)(struct pt_regs *regs);
+typedef void (*rr_thread_create_cb_t)(struct task_struct *tsk, replay_sphere_t *sphere);
+typedef void (*rr_thread_exit_cb_t)(struct pt_regs *regs);
+typedef void (*rr_switch_from_cb_t)(struct task_struct *prev_p);
+typedef void (*rr_switch_to_cb_t)(struct task_struct *next_p);
+typedef int (*rr_general_protection_cb_t)(struct pt_regs *regs);
+typedef void (*rr_copy_to_user_cb_t)(unsigned long to_addr, void *buf, int len);
+typedef int (*rr_deliver_signal_cb_t)(int signr, struct pt_regs *regs);
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-int rr_do_debug(struct pt_regs *regs, long error_code);
+typedef int (*rr_do_debug_cb_t)(struct pt_regs *regs, long error_code);
 #endif
+
 
 // from usermode calls
 // for the two fifo calls as long as we have mutual exclution wrt

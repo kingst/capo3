@@ -59,7 +59,23 @@
 #include <asm/mach_traps.h>
 
 #ifdef CONFIG_RECORD_REPLAY
+
 #include <asm/replay.h>
+
+static rr_general_protection_cb_t rr_general_protection_cb = NULL;
+void set_rr_general_protection_cb(rr_general_protection_cb_t cb) {
+    rr_general_protection_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_general_protection_cb);
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+static rr_do_debug_cb_t rr_do_debug_cb = NULL;
+void set_rr_do_debug_cb(rr_do_debug_cb_t cb) {
+    rr_do_debug_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_do_debug_cb);
+#endif
+
 #endif
 
 
@@ -279,8 +295,8 @@ do_general_protection(struct pt_regs *regs, long error_code)
 		goto gp_in_kernel;
 
 #ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY)) {
-                if(rr_general_protection(regs)) {
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_general_protection_cb)) {
+                if(rr_general_protection_cb(regs)) {
                         return;
                 }
         }
@@ -552,10 +568,10 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	get_debugreg(dr6, 6);
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-        if(test_thread_flag(TIF_RECORD_REPLAY)) {
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_do_debug_cb)) {
                 // XXX FIXME there might be issues with dr6
                 conditional_sti(regs);
-                if(rr_do_debug(regs, error_code)) {
+                if(rr_do_debug_cb(regs, error_code)) {
                         conditional_cli(regs);
                         return;
                 }

@@ -12,7 +12,7 @@
 #include <asm/page.h>
 
 #ifdef CONFIG_RECORD_REPLAY
-void rr_copy_to_user(unsigned long to_addr, void *buf, int len);
+extern void (*rr_copy_to_user_cb)(unsigned long to_addr, void *buf, int len);
 #endif
 
 /*
@@ -77,8 +77,8 @@ static __always_inline __must_check
 int copy_to_user(void __user *dst, const void *src, unsigned size)
 {
         int ret = copy_to_user_orig(dst, src, size);    
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
-                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_copy_to_user_cb))
+                rr_copy_to_user_cb((unsigned long) dst, (void *) src, size);
         return ret;
 }
 
@@ -184,8 +184,8 @@ static __always_inline __must_check
 int __copy_to_user(void __user *dst, const void *src, unsigned size)
 {
         int ret = __copy_to_user_orig(dst, src, size);    
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
-                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_copy_to_user_cb))
+                rr_copy_to_user_cb((unsigned long) dst, (void *) src, size);
         return ret;
 }
 
@@ -270,8 +270,8 @@ __copy_to_user_inatomic(void __user *dst, const void *src, unsigned size)
 {
 #ifdef CONFIG_RECORD_REPLAY
         int ret = copy_user_generic((__force void *)dst, src, size);
-        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY))
-                rr_copy_to_user((unsigned long) dst, (void *) src, size);
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_copy_to_user_cb))
+                rr_copy_to_user_cb((unsigned long) dst, (void *) src, size);
 	return ret;
 #else
         return copy_user_generic((__force void *)dst, src, size);
