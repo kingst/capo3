@@ -522,8 +522,9 @@ void rr_thread_exit(struct pt_regs *regs) {
 
         sanity_check(current);
 
-        if(sphere_is_chunk_replaying(rtcb->sphere))
-                sphere_chunk_end(current, 1);
+        if(sphere_is_chunk_replaying(rtcb->sphere)) {
+                sphere_chunk_end(current);
+        }
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -562,10 +563,9 @@ void rr_switch_from(struct task_struct *prev_p) {
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
                 long dr7;
-                chunk_t *chunk;
                 uint32_t rem;
+                chunk_t *chunk = prev_p->rtcb->chunk;
 
-                chunk = prev_p->rtcb->chunk;
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
                         BUG_ON((dr7 & 0xf) != 0x1);                        
@@ -583,10 +583,8 @@ void rr_switch_to(struct task_struct *next_p) {
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(next_p->rtcb != NULL) {
-                replay_sphere_t *sphere;
-                chunk_t *chunk;
-                sphere = next_p->rtcb->sphere;
-                chunk = next_p->rtcb->chunk;
+                replay_sphere_t *sphere = next_p->rtcb->sphere;
+                chunk_t *chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
                         task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
@@ -670,7 +668,9 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                        rtcb->thread_id, rtcb->chunk->inst_count);
 
                 if(rtcb->chunk->inst_count == 0) {
-                        sphere_chunk_end(current, 0);
+                        sphere_chunk_end(current);
+                        sphere_chunk_begin(current);
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
                         // this chunk will refer to the new chunk that just got loaded
                         if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;

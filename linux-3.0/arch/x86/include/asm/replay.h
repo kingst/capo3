@@ -180,7 +180,7 @@ void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs);
 
 // for chunk replay
 void sphere_chunk_begin(struct task_struct *tsk);
-void sphere_chunk_end(struct task_struct *tsk, int is_last);
+void sphere_chunk_end(struct task_struct *tsk);
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip);
 #endif
