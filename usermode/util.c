@@ -49,6 +49,10 @@
 #include <assert.h>
 #include <string.h>
 
+#ifdef CONFIG_SIMICS
+#include "simics_if.h"
+#endif
+
 void write_bytes(int fd, void *tbuf, int len) {
         int ret;
         int bytesWritten = 0;
@@ -93,6 +97,10 @@ pid_t startChild(int replayFd, char *argv[], char *envp[], start_t type) {
                 } else {
                         assert(0);
                 }
+
+        #ifdef CONFIG_SIMICS
+                my_magic_stats_reset();
+        #endif
                 execve(argv[0], argv, envp);
                 assert(0);
         }
