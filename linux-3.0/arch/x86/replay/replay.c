@@ -319,17 +319,18 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(!sphere_has_first_execve(rtcb->sphere))
                 return;
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(rtcb->chunk) {
                 long dr7, dr0;
                 get_debugreg(dr7, 7);
-                if(((dr7 & 0xf) != 0x1) && !rtcb->singlestep) {
+                if((dr7 & 0xf) != 0x1) {
                         get_debugreg(dr0, 0);
                         printk(KERN_CRIT "############# resetting tid %u system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
                                rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
                         sphere_set_breakpoint(rtcb->chunk->ip);
                 }
-
         }
+#endif
 
         // we clear send_sig here because we use it to prevent recording spurious
         // syscall_exit events that happen when we send signals on the syscall
@@ -509,10 +510,9 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
-        rtcb->singlestep = 0;
         rtcb->needs_chunk_start = current != tsk;
         rtcb->my_ticket = 0;
-        rtcb->is_in_chunk_begin = 0;
+        rtcb->perf_count = 0;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -522,8 +522,9 @@ void rr_thread_exit(struct pt_regs *regs) {
 
         sanity_check(current);
 
-        if(sphere_is_chunk_replaying(rtcb->sphere))
-                sphere_chunk_end(current, 1);
+        if(sphere_is_chunk_replaying(rtcb->sphere)) {
+                sphere_chunk_end(current);
+        }
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -535,32 +536,69 @@ void rr_thread_exit(struct pt_regs *regs) {
         kfree(rtcb);
 }
 
-void rr_switch_from(struct task_struct *prev_p) {
-        chunk_t *chunk;
-        long dr7;
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
+        u64 perf_count;
+        u32 num_inst;
+        u32 rem = 0;
 
+        perf_count = perf_counter_read();
+        num_inst = perf_count - rtcb->perf_count;
+        if(num_inst > chunk->inst_count) {
+                rem = num_inst - chunk->inst_count;
+                printk(KERN_CRIT "warning, counted %u too many instructions in chunk\n", rem);
+                chunk->inst_count = 0;
+        } else {
+                chunk->inst_count -= num_inst;
+        }
+        rtcb->perf_count = perf_count;
+
+        // XXX REMOVE THESE
+        chunk->inst_count = 0;
+        rem = 0;
+        // XXX
+
+
+        return rem;
+}
+#endif
+
+void rr_switch_from(struct task_struct *prev_p) {
+
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
-                chunk = prev_p->rtcb->chunk;
+                long dr7;
+                uint32_t rem;
+                chunk_t *chunk = prev_p->rtcb->chunk;
+
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
                         BUG_ON((dr7 & 0xf) != 0x1);                        
                         sphere_set_breakpoint(0);
+                        rem = update_perf_count(prev_p->rtcb, chunk);
+                        if(rem)
+                                printk(KERN_CRIT "BUG!!!!! chunk done and scheduling out, rem = %u\n", rem);
                 }
         }
+#endif
+
 }
 
 void rr_switch_to(struct task_struct *next_p) {
-        replay_sphere_t *sphere;
-        chunk_t *chunk;
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(next_p->rtcb != NULL) {
-                sphere = next_p->rtcb->sphere;
-                chunk = next_p->rtcb->chunk;
+                replay_sphere_t *sphere = next_p->rtcb->sphere;
+                chunk_t *chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
+                        task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
                         sphere_set_breakpoint(chunk->ip);
+                        next_p->rtcb->perf_count = perf_counter_read();
                 }
         }
+#endif
+
 }
 
 int rr_general_protection(struct pt_regs *regs) {
@@ -609,15 +647,13 @@ void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
-
 EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
-static int num_inst = 0;
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 
 int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
-        uint64_t ni, inst;
         int step = 0;
 
         if(rtcb == NULL)
@@ -629,39 +665,33 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         BUG_ON(!user_mode(regs));
 
-        if(dr6 & (1<<14)) {
-                BUG_ON(!rtcb->singlestep);
-                rtcb->singlestep = 0;
-                printk(KERN_CRIT "*** step 0x%p\n", (void *) regs->ip);
-                sphere_set_breakpoint(rtcb->chunk->ip);
-                user_disable_single_step(current);
-                // XXX FIXME we need to check if the app just set the trap flag (which should not happen, but could)
-                regs->flags &= ~X86_EFLAGS_TF;
-                BUG_ON(dr6 & 1);
-        } else if(dr6 & 1) {
-                ni = perf_counter_read();
-                inst = ni - num_inst;
+        if(dr6 & 1) {
+                BUG_ON(regs->ip != rtcb->chunk->ip);
+                update_perf_count(rtcb, rtcb->chunk);
 
-                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", 
-                       rtcb->thread_id, inst);
-                num_inst = ni;
+                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst left = %u\n", 
+                       rtcb->thread_id, rtcb->chunk->inst_count);
 
-                if(inst >= rtcb->chunk->inst_count) {
-                        sphere_chunk_end(current, 0);
-                        if(regs->ip == rtcb->chunk->ip) {
+                if(rtcb->chunk->inst_count == 0) {
+                        sphere_chunk_end(current);
+                        sphere_chunk_begin(current);
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
+                        // this chunk will refer to the new chunk that just got loaded
+                        if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;
                         }
                 } else {
+                        printk(KERN_CRIT "chunk num inst = %u\n",
+                               rtcb->chunk->inst_count);
                         step = 1;
                 }
 
                 if(step) {
-                        // XXX FIXME I don't know if this will work if the next inst is a syscall
-                        printk(KERN_CRIT "single stepping........\n");
-                        rtcb->singlestep = 1;
-                        sphere_set_breakpoint(0);
-                        user_enable_single_step(current);
-                        regs->flags |= X86_EFLAGS_TF;
+                        // setting the RF here will make sure that the
+                        // software can execute the instruction pointed
+                        // to by the breakpoint without causing a breakpoint
+                        // exception
+                        regs->flags |= X86_EFLAGS_RF;
                 }
         } else {
                 BUG();
@@ -669,32 +699,19 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         set_debugreg(0, 6);
 
-        /*
-        if(rtcb->stepping) {
-                printk(KERN_CRIT "stepping ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
-                set_debugreg(rtcb->chunk->ip, 0);
-                set_debugreg(0x1, 7);
-                rtcb->stepping = 0;
-                regs->flags &= ~X86_EFLAGS_TF;
-        } else {
-                BUG_ON(regs->ip != rtcb->chunk->ip);
-                printk(KERN_CRIT "breakpoint ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
-                set_debugreg(0, 7);
-                set_debugreg(0, 0);
-                rtcb->stepping = 1;
-                regs->flags |= X86_EFLAGS_TF;
-        }
-        */
-
         return 1;
 }
+#endif
 
 /**********************************************************************************************/
 
 
 /************* Performance Monitoring Overflow Interrupt Handler ******************************/
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void capo_overflow_handler(struct perf_event * event, int unused, struct
                 perf_sample_data * data, struct pt_regs *regs) {
 
 }
+#endif
 /**********************************************************************************************/
+
