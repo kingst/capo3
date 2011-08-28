@@ -154,6 +154,7 @@ void mrr_switch_from(struct task_struct *tsk) {
             // if the chunk has been exhausted (but not ended), 
             // end it now
             if (0 == rtcb->chunk->inst_count) {
+                my_magic_message("calling sphere_chunk_end");
                 sphere_chunk_end(tsk, 0);
             }
         }

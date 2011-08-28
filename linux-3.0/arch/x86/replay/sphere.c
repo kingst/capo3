@@ -489,6 +489,7 @@ static void handle_mmap_optimization(struct pt_regs *regs, replay_header_t *head
 
 static void replay_handle_event(replay_sphere_t *sphere, replay_event_t event, 
                                 struct pt_regs *regs, replay_header_t *header) {
+
         if(header->type == syscall_enter_event) {
                 if(sphere->replay_first_execve)
                         check_regs(regs, &header->regs);
@@ -925,6 +926,15 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
 
         mutex_lock(&sphere->mutex);
         ret = record_header_locked(sphere, event, thread_id, regs);
+
+#ifdef CONFIG_MRR
+        // this should only happen on the exit of the first execve in the first
+        // thread that executes execve, gets chunking started
+        if(sphere->replay_first_execve == 1) {
+                sphere->replay_first_execve = 2;
+                mrr_switch_to(current);
+        }
+#endif
         mutex_unlock(&sphere->mutex);
 
         if(ret)
