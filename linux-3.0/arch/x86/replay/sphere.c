@@ -994,7 +994,7 @@ void sphere_chunk_end(struct task_struct *tsk) {
                 }
         }
 
-        printk(KERN_CRIT "chunk done (inst_count = %u\n", rtcb->chunk->inst_count);
+        printk(KERN_CRIT "chunk done inst_count = %u\n", rtcb->chunk->inst_count);
         rtcb->chunk = NULL;
         kfree(chunk);
 }

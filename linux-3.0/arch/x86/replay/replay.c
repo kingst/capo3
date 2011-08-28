@@ -553,6 +553,11 @@ static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
         }
         rtcb->perf_count = perf_count;
 
+        // XXX REMOVE THESE
+        chunk->inst_count = 0;
+        rem = 0;
+        // XXX
+
 
         return rem;
 }
@@ -693,23 +698,6 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
         }
 
         set_debugreg(0, 6);
-
-        /*
-        if(rtcb->stepping) {
-                printk(KERN_CRIT "stepping ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
-                set_debugreg(rtcb->chunk->ip, 0);
-                set_debugreg(0x1, 7);
-                rtcb->stepping = 0;
-                regs->flags &= ~X86_EFLAGS_TF;
-        } else {
-                BUG_ON(regs->ip != rtcb->chunk->ip);
-                printk(KERN_CRIT "breakpoint ip = %p, error_code = %ld\n", (void *) regs->ip, error_code);
-                set_debugreg(0, 7);
-                set_debugreg(0, 0);
-                rtcb->stepping = 1;
-                regs->flags |= X86_EFLAGS_TF;
-        }
-        */
 
         return 1;
 }
