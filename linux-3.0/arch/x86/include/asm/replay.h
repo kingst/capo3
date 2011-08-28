@@ -123,7 +123,6 @@ typedef struct replay_thread_control_block {
         uint64_t send_sig;
         struct chunk_struct *chunk;
         uint32_t my_ticket;
-        int singlestep;
         int needs_chunk_start;
 } rtcb_t;
 

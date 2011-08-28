@@ -323,7 +323,7 @@ void rr_syscall_enter(struct pt_regs *regs) {
         if(rtcb->chunk) {
                 long dr7, dr0;
                 get_debugreg(dr7, 7);
-                if(((dr7 & 0xf) != 0x1) && !rtcb->singlestep) {
+                if((dr7 & 0xf) != 0x1) {
                         get_debugreg(dr0, 0);
                         printk(KERN_CRIT "############# resetting tid %u system call %ld chunkip = 0x%p dr7 0x%08lx, dr0 0x%08lx\n", 
                                rtcb->thread_id, regs->orig_ax, (void *) rtcb->chunk->ip, dr7, dr0);
@@ -510,7 +510,6 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->def_sig = 0;
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
-        rtcb->singlestep = 0;
         rtcb->needs_chunk_start = current != tsk;
         rtcb->my_ticket = 0;
         tsk->rtcb = rtcb;
@@ -635,39 +634,33 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         BUG_ON(!user_mode(regs));
 
-        if(dr6 & (1<<14)) {
-                BUG_ON(!rtcb->singlestep);
-                rtcb->singlestep = 0;
-                printk(KERN_CRIT "*** step 0x%p\n", (void *) regs->ip);
-                sphere_set_breakpoint(rtcb->chunk->ip);
-                user_disable_single_step(current);
-                // XXX FIXME we need to check if the app just set the trap flag (which should not happen, but could)
-                regs->flags &= ~X86_EFLAGS_TF;
-                BUG_ON(dr6 & 1);
-        } else if(dr6 & 1) {
+        if(dr6 & 1) {
+                BUG_ON(regs->ip != rtcb->chunk->ip);
                 ni = perf_counter_read();
                 inst = ni - num_inst;
 
                 printk(KERN_CRIT "****** breakpoint (tid=%u), num inst = %llu\n", 
                        rtcb->thread_id, inst);
-                num_inst = ni;
 
                 if(inst >= rtcb->chunk->inst_count) {
                         sphere_chunk_end(current, 0);
-                        if(regs->ip == rtcb->chunk->ip) {
+                        if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;
                         }
+                        num_inst = ni;
                 } else {
+                        printk(KERN_CRIT "chunk num inst = %llu, current chunk %llu\n",
+                               rtcb->chunk->inst_count, inst);
                         step = 1;
                 }
 
                 if(step) {
-                        // XXX FIXME I don't know if this will work if the next inst is a syscall
-                        printk(KERN_CRIT "single stepping........\n");
-                        rtcb->singlestep = 1;
-                        sphere_set_breakpoint(0);
-                        user_enable_single_step(current);
-                        regs->flags |= X86_EFLAGS_TF;
+                        // setting the RF here will make sure that the
+                        // software can execute the instruction pointed
+                        // to by the breakpoint without causing a breakpoint
+                        // exception
+                        printk(KERN_CRIT "setting RF......\n");
+                        regs->flags |= X86_EFLAGS_RF;
                 }
         } else {
                 BUG();
