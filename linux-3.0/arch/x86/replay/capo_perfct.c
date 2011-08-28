@@ -57,7 +57,7 @@ static struct perf_event_attr *attr = NULL;
 /*
  * This function sets up the performance counter registers to record. 
  */
-struct perf_event perf_counter_init(struct task_struct *tsk){
+struct perf_event *perf_counter_init(struct task_struct *tsk){
         int cpu;
         struct perf_event *pevent;
 

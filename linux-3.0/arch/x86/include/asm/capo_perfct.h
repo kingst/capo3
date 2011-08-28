@@ -45,7 +45,7 @@
 #ifndef _PERFCT_H_
 #define _PERFCT_H_
 
-struct perf_event perf_counter_init(struct task_struct *tsk);
+struct perf_event *perf_counter_init(struct task_struct *tsk);
 void perf_counter_term(struct perf_event *pevent);
 u64 perf_counter_read(struct perf_event *pevent);
 void capo_perf_event_enable(struct perf_event *pevent);
