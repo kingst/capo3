@@ -128,6 +128,10 @@ typedef struct replay_thread_control_block {
         int needs_chunk_start;
         uint64_t perf_count;
         struct perf_event *pevent;
+#ifdef CONFIG_MRR
+        // TODO: change this later
+        char chunk_size_buffer[1024];
+#endif
 } rtcb_t;
 
 // kernel callback function types

@@ -54,6 +54,11 @@
 #include <asm/ftrace.h>
 #include <asm/percpu.h>
 
+#ifdef CONFIG_MRR
+#include <asm/mrr/mrrhw_if.h>
+#endif
+
+
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
 #define AUDIT_ARCH_X86_64	(EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
@@ -176,6 +181,27 @@ ENTRY(native_usergs_sysret64)
 ENDPROC(native_usergs_sysret64)
 #endif /* CONFIG_PARAVIRT */
 
+#ifdef CONFIG_MRR
+
+#define SETUP_MRR_FLAG_R11(label_id,offset) \
+    testl $_TIF_MRR_CHUNKING, TI_flags(%rcx) ; \
+    jz mrr_continue_##label_id##_unset ; \
+    orq $MRR_FLAG_MASK, R11-ARGOFFSET+offset(%rsp) ; \
+    jmp mrr_continue_##label_id ; \
+mrr_continue_##label_id##_unset: ; \
+    andq $~MRR_FLAG_MASK, R11-ARGOFFSET+offset(%rsp) ; \
+mrr_continue_##label_id:
+
+#define SETUP_MRR_FLAG_EFLAGS(label_id,offset) \
+    testl $_TIF_MRR_CHUNKING, TI_flags(%rcx) ; \
+    jz mrr_continue_##label_id##_unset ; \
+    orq $MRR_FLAG_MASK, EFLAGS-ARGOFFSET+offset(%rsp) ; \
+    jmp mrr_continue_##label_id ; \
+mrr_continue_##label_id##_unset: ; \
+    andq $~MRR_FLAG_MASK, EFLAGS-ARGOFFSET+offset(%rsp) ; \
+mrr_continue_##label_id:
+
+#endif
 
 .macro TRACE_IRQS_IRETQ offset=ARGOFFSET
 #ifdef CONFIG_TRACE_IRQFLAGS
@@ -501,6 +527,9 @@ sysret_check:
 	movl TI_flags(%rcx),%edx
 	andl %edi,%edx
 	jnz  sysret_careful
+#ifdef CONFIG_MRR
+    SETUP_MRR_FLAG_R11(0, 0)
+#endif
 	CFI_REMEMBER_STATE
 	/*
 	 * sysretq will re-enable interrupts:
@@ -848,6 +877,10 @@ retint_swapgs:		/* return to user-space */
 	 */
 	DISABLE_INTERRUPTS(CLBR_ANY)
 	TRACE_IRQS_IRETQ
+#ifdef CONFIG_MRR
+    // set the mrr flag
+    SETUP_MRR_FLAG_EFLAGS(1, 0)
+#endif
 	SWAPGS
 	jmp restore_args
 
@@ -1121,6 +1154,10 @@ zeroentry spurious_interrupt_bug do_spurious_interrupt_bug
 zeroentry coprocessor_error do_coprocessor_error
 errorentry alignment_check do_alignment_check
 zeroentry simd_coprocessor_error do_simd_coprocessor_error
+#ifdef CONFIG_MRR
+zeroentry mrr_full do_mrr_full
+zeroentry mrr_chunk_done do_mrr_chunk_done
+#endif
 
 	/* Reload gs selector with exception handling */
 	/* edi:  new selector */

@@ -65,6 +65,9 @@
 
 #include <asm/replay.h>
 #include <asm/capo_perfct.h>
+#ifdef CONFIG_MRR
+#include "mrr_if.h"
+#endif
 
 #define NUM_REPLAY_MINOR 4
 
@@ -327,6 +330,16 @@ static void rr_thread_exit(struct pt_regs *regs) {
                 sphere_chunk_end(current);
         }
 
+#ifdef CONFIG_MRR
+        // we are switching away from this thread,
+        // so call mrr_switch_from
+        // this does not need to grab the mutex
+        mrr_switch_from(current);
+#endif
+
+        if(sphere_is_chunk_replaying(rtcb->sphere))
+                sphere_chunk_end(current, 1);
+
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
         sphere_thread_exit(rtcb, regs);
@@ -358,6 +371,16 @@ static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
 #endif
 
 static void rr_switch_from(struct task_struct *prev_p) {
+
+#ifdef CONFIG_MRR
+        // flush the mrr buffer, if necessary
+        if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
+                BUG_ON(current != prev_p);
+                sanity_check(prev_p);
+                mrr_switch_from(prev_p);
+        }
+#endif
+
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
                 long dr7;
@@ -373,6 +396,15 @@ static void rr_switch_from(struct task_struct *prev_p) {
 }
 
 static void rr_switch_to(struct task_struct *next_p) {
+
+#ifdef CONFIG_MRR
+        // prepare the mrr hw for the next thread, if necessary
+        if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
+                BUG_ON(current != next_p);
+                sanity_check(next_p);
+                mrr_switch_to(next_p);
+        }
+#endif
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(next_p->rtcb != NULL) {
