@@ -317,6 +317,9 @@ static void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->my_ticket = 0;
         rtcb->perf_count = 0;
         rtcb->pevent = NULL;
+#ifdef CONFIG_MRR
+        rtcb->is_in_chunk_begin = 0;
+#endif
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -331,14 +334,12 @@ static void rr_thread_exit(struct pt_regs *regs) {
         }
 
 #ifdef CONFIG_MRR
-        // we are switching away from this thread,
-        // so call mrr_switch_from
-        // this does not need to grab the mutex
-        mrr_switch_from(current);
+        if (sphere_is_recording(rtcb->sphere)) {
+                mrr_switch_from_record(current);
+        } else if (sphere_is_chunk_replaying(rtcb->sphere)) {
+                mrr_switch_from_replay(current);
+        }
 #endif
-
-        if(sphere_is_chunk_replaying(rtcb->sphere))
-                sphere_chunk_end(current, 1);
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
@@ -373,11 +374,14 @@ static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
 static void rr_switch_from(struct task_struct *prev_p) {
 
 #ifdef CONFIG_MRR
-        // flush the mrr buffer, if necessary
         if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
                 BUG_ON(current != prev_p);
                 sanity_check(prev_p);
-                mrr_switch_from(prev_p);
+                if (sphere_is_recording(prev_p->rtcb->sphere)) {
+                        mrr_switch_from_record(prev_p);
+                } else if (sphere_is_chunk_replaying(prev_p->rtcb->sphere)) {
+                        mrr_switch_from_replay(prev_p);
+                }
         }
 #endif
 
@@ -402,7 +406,11 @@ static void rr_switch_to(struct task_struct *next_p) {
         if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
                 BUG_ON(current != next_p);
                 sanity_check(next_p);
-                mrr_switch_to(next_p);
+                if (sphere_is_recording(next_p->rtcb->sphere)) {
+                        mrr_switch_to_record(next_p);
+                } else if (sphere_is_chunk_replaying(next_p->rtcb->sphere)) {
+                        mrr_switch_to_replay(next_p);
+                }
         }
 #endif
 

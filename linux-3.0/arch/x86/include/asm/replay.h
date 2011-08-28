@@ -130,6 +130,7 @@ typedef struct replay_thread_control_block {
         struct perf_event *pevent;
 #ifdef CONFIG_MRR
         // TODO: change this later
+        int is_in_chunk_begin;
         char chunk_size_buffer[1024];
 #endif
 } rtcb_t;

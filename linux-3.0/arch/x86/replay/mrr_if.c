@@ -8,48 +8,49 @@
 #define MSG_PREFIX "KernelMrr: "
 
 
-static void prepare_mrr(struct task_struct *tsk) {
+/*
+ * this function does not sleep.
+ */
+static void prepare_mrr_record(struct task_struct *tsk) {
 
     rtcb_t *rtcb = tsk->rtcb;
     replay_sphere_t *sphere = rtcb->sphere;
 
-    // we should only enable mrr chunking after the first execve
-    // since we do not want to record/replay the driver program
-    // (since it behaves differently in record and replay modes)
-    if (sphere_is_recording_replaying(sphere) && sphere->replay_first_execve) {
-
-        // set the chunking flag for the thread
-        // FIXME
-        //if (sphere_is_chunking(rtcb->sphere))
+    // FIXME: add sphere_is_chunk_recording()
+    if (sphere_is_recording(sphere) /*sphere_is_chunk_recording(sphere)*/ && sphere_has_first_execve(sphere)) {
         set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
-
-        // set the mrr hardware into proper mode
-        if (sphere_is_recording(sphere)) {
-            mrr_set_record();
-        }
-        else if (sphere_is_chunk_replaying(sphere)) {
-
-            // set the mode
-            mrr_set_replay();
-
-            // get the next chunk from the log, if necessary, and set the target chunk size
-            // care must be taken here since there might be a race between
-            // this invocation of sphere_chunk_begin() and a previous call
-            // to the same function that caused a context switch and is still
-            // in progress.
-            if (NULL == rtcb->chunk /* && !rtcb->is_in_chunk_begin */) {
-                sphere_chunk_begin(tsk);
-                BUG_ON(NULL == rtcb->chunk);
-            }
-
-            if (NULL != rtcb->chunk) {
-                BUG_ON(0 == rtcb->chunk->inst_count);
-                mrr_set_target_chunk_size(rtcb->chunk->inst_count);
-            }
-        }
+        mrr_set_record();
     }
 }
 
+
+static void prepare_mrr_replay(struct task_struct *tsk) {
+
+    rtcb_t *rtcb = tsk->rtcb;
+    replay_sphere_t *sphere = rtcb->sphere;
+
+    if (sphere_is_chunk_replaying(sphere) && sphere_has_first_execve(sphere)) {
+
+        set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
+        mrr_set_replay();
+
+        // get the next chunk from the log, if necessary, and set the target chunk size
+        // care must be taken here since there might be a race between
+        // this invocation of sphere_chunk_begin() and a previous call
+        // to the same function that caused a context switch and is still
+        // in progress.
+
+        if (NULL == rtcb->chunk && !rtcb->is_in_chunk_begin) {
+            sphere_chunk_begin(tsk);
+            BUG_ON(NULL == rtcb->chunk);
+        }
+
+        if (NULL != rtcb->chunk) {
+            BUG_ON(0 == rtcb->chunk->inst_count);
+            mrr_set_target_chunk_size(rtcb->chunk->inst_count);
+        }
+    }
+}
 
 /*
  * For recording mode. this function will have the processor 
@@ -107,7 +108,7 @@ void mrr_chunk_done_handler(struct task_struct *tsk) {
         // signal the end of the current chunk
         if (NULL != rtcb->chunk) {
             my_magic_message("calling sphere_chunk_end");
-            sphere_chunk_end(current, 0);
+            sphere_chunk_end(current);
         }
 
         // we might sleep, so enable irqs
@@ -128,18 +129,30 @@ void mrr_chunk_done_handler(struct task_struct *tsk) {
 
 /*
  * handles switching from a recoded thread
- * PRECOND: tsk should not be holding sphere->mutex.
+ * This function does not sleep.
  */
-void mrr_switch_from(struct task_struct *tsk) {
+void mrr_switch_from_record(struct task_struct *tsk) {
 
     rtcb_t *rtcb = tsk->rtcb;
 
-    // recording mode: flush the mrr buffer
+    // flush the mrr buffer
     if (sphere_is_recording(rtcb->sphere) && test_tsk_thread_flag(tsk, TIF_MRR_CHUNKING)) {
         mrr_buffer_full_handler(tsk, true);
     }
 
-    // replay mode: save the remaining inst count
+    my_magic_app_out();
+}
+
+
+/*
+ * handles switching from a recoded thread
+ * This function does not sleep.
+ */
+void mrr_switch_from_replay(struct task_struct *tsk) {
+
+    rtcb_t *rtcb = tsk->rtcb;
+
+    // save the remaining inst count
     if (sphere_is_replaying(rtcb->sphere) && test_tsk_thread_flag(tsk, TIF_MRR_CHUNKING)) {
         if (rtcb->chunk != NULL) {
             uint32_t cur_inst_count = mrr_get_chunk_size(1);
@@ -155,7 +168,7 @@ void mrr_switch_from(struct task_struct *tsk) {
             // end it now
             if (0 == rtcb->chunk->inst_count) {
                 my_magic_message("calling sphere_chunk_end");
-                sphere_chunk_end(tsk, 0);
+                sphere_chunk_end(tsk);
             }
         }
     }
@@ -166,11 +179,21 @@ void mrr_switch_from(struct task_struct *tsk) {
 
 /*
  * handles switching to a recoded thread
- * PRECOND: tsk should not be holding sphere->mutex.
  */
-void mrr_switch_to(struct task_struct *tsk) {
+void mrr_switch_to_record(struct task_struct *tsk) {
     my_magic_app_in();
-    prepare_mrr(tsk);
+    prepare_mrr_record(tsk);
+}
+
+
+/*
+ * handles switching to a replayed thread
+ * PRECOND: tsk should not be holding sphere->mutex since 
+ * this function may sleep.
+ */
+void mrr_switch_to_replay(struct task_struct *tsk) {
+    my_magic_app_in();
+    prepare_mrr_replay(tsk);
 }
 
 

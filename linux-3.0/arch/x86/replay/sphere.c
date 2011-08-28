@@ -297,8 +297,12 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
 static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t thread_id) {
         replay_header_t *header;
 
-        while(!is_next_log(sphere, thread_id))
+        my_magic_message_int("waiting for next log entry", thread_id);
+        while(!is_next_log(sphere, thread_id)) {
+                my_magic_message_int("waiting for next log entry", thread_id);
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
+        }
+        my_magic_message_int("get the next log entry", thread_id);
 
         if((sphere->header == NULL) || (sphere->header->thread_id != thread_id))
                 BUG();
@@ -615,6 +619,10 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         BUG_ON(rtcb->chunk != NULL);
 
+#ifdef CONFIG_MRR
+        rtcb->is_in_chunk_begin = 1;
+#endif
+
         my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
         while(!is_next_chunk(sphere, rtcb->thread_id)) {
                 my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
@@ -660,6 +668,9 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
         printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *) chunk->ip);
+#ifdef CONFIG_MRR
+        rtcb->is_in_chunk_begin = 0;
+#endif
 }
 
 
@@ -932,7 +943,7 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
         // thread that executes execve, gets chunking started
         if(sphere->replay_first_execve == 1) {
                 sphere->replay_first_execve = 2;
-                mrr_switch_to(current);
+                mrr_switch_to_record(current);
         }
 #endif
         mutex_unlock(&sphere->mutex);
@@ -979,7 +990,8 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         // thread that executes execve, gets chunking started        
         if(sphere_is_chunk_replaying(sphere)) {
                 if(sphere->replay_first_execve == 1) {
-                #ifdef CONFIG_MRR        
+                #ifdef CONFIG_MRR
+                        // mrr_switch_to_replay() may sleep. don't call it here
                         start_mrr = 1;
                 #endif
                         sphere->replay_first_execve = 2;
@@ -1003,7 +1015,7 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
 
 #ifdef CONFIG_MRR
         if (start_mrr) {
-                mrr_switch_to(current);
+                mrr_switch_to_replay(current);
         }
 #endif
 }
