@@ -116,6 +116,8 @@ typedef struct replay_sphere {
         cond_t cur_tickets_updated;
 } replay_sphere_t;
 
+struct perf_event;
+
 typedef struct replay_thread_control_block {
         struct replay_sphere *sphere;
         uint32_t thread_id;
@@ -125,6 +127,7 @@ typedef struct replay_thread_control_block {
         uint32_t my_ticket;
         int needs_chunk_start;
         uint64_t perf_count;
+        struct perf_event *pevent;
 } rtcb_t;
 
 void rr_syscall_enter(struct pt_regs *regs);
@@ -159,7 +162,7 @@ int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb);
 
 // called from record/replay threads when allocated
 // might be called from context of a different thread
-void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs);
+void sphere_thread_exit(rtcb_t *rtcb, struct pt_regs *regs);
 uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs);
 
 // simple status calls

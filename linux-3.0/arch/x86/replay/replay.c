@@ -513,6 +513,7 @@ void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->needs_chunk_start = current != tsk;
         rtcb->my_ticket = 0;
         rtcb->perf_count = 0;
+        rtcb->pevent = NULL;
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -529,55 +530,24 @@ void rr_thread_exit(struct pt_regs *regs) {
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
 
-        sphere_thread_exit(rtcb->sphere, rtcb->thread_id, regs);
+        sphere_thread_exit(rtcb, regs);
 
         //BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }
 
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
-        u64 perf_count;
-        u32 num_inst;
-        u32 rem = 0;
-
-        perf_count = perf_counter_read();
-        num_inst = perf_count - rtcb->perf_count;
-        if(num_inst > chunk->inst_count) {
-                rem = num_inst - chunk->inst_count;
-                printk(KERN_CRIT "warning, counted %u too many instructions in chunk\n", rem);
-                chunk->inst_count = 0;
-        } else {
-                chunk->inst_count -= num_inst;
-        }
-        rtcb->perf_count = perf_count;
-
-        // XXX REMOVE THESE
-        chunk->inst_count = 0;
-        rem = 0;
-        // XXX
-
-
-        return rem;
-}
-#endif
-
 void rr_switch_from(struct task_struct *prev_p) {
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
                 long dr7;
-                uint32_t rem;
                 chunk_t *chunk = prev_p->rtcb->chunk;
 
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
                         BUG_ON((dr7 & 0xf) != 0x1);                        
                         sphere_set_breakpoint(0);
-                        rem = update_perf_count(prev_p->rtcb, chunk);
-                        if(rem)
-                                printk(KERN_CRIT "BUG!!!!! chunk done and scheduling out, rem = %u\n", rem);
                 }
         }
 #endif
@@ -594,7 +564,6 @@ void rr_switch_to(struct task_struct *next_p) {
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
                         task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
                         sphere_set_breakpoint(chunk->ip);
-                        next_p->rtcb->perf_count = perf_counter_read();
                 }
         }
 #endif
@@ -655,6 +624,8 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
         int step = 0;
+        u32 inst_count;
+        u64 perf_count;
 
         if(rtcb == NULL)
                 return 0;
@@ -667,12 +638,18 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         if(dr6 & 1) {
                 BUG_ON(regs->ip != rtcb->chunk->ip);
-                update_perf_count(rtcb, rtcb->chunk);
+                perf_count = perf_counter_read(rtcb->pevent);
+                inst_count = perf_count - rtcb->perf_count;
 
-                printk(KERN_CRIT "****** breakpoint (tid=%u), num inst left = %u\n", 
-                       rtcb->thread_id, rtcb->chunk->inst_count);
+                printk(KERN_CRIT "****** breakpoint (tid=%u), inst count = %u %u\n", 
+                       rtcb->thread_id, rtcb->chunk->inst_count, inst_count);
 
-                if(rtcb->chunk->inst_count == 0) {
+                if(inst_count >= rtcb->chunk->inst_count) {
+                        if(inst_count > rtcb->chunk->inst_count) {
+                                printk(KERN_CRIT "went past by %u inst\n",
+                                       inst_count - rtcb->chunk->inst_count);
+                        }
+                        rtcb->perf_count = perf_count;
                         sphere_chunk_end(current);
                         sphere_chunk_begin(current);
                         sphere_set_breakpoint(current->rtcb->chunk->ip);
@@ -681,8 +658,6 @@ int rr_do_debug(struct pt_regs *regs, long error_code) {
                                 step = 1;
                         }
                 } else {
-                        printk(KERN_CRIT "chunk num inst = %u\n",
-                               rtcb->chunk->inst_count);
                         step = 1;
                 }
 

@@ -875,7 +875,10 @@ uint32_t sphere_thread_create(replay_sphere_t *sphere, struct pt_regs *regs) {
 
 }
 
-void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_regs *regs) {
+void sphere_thread_exit(rtcb_t *rtcb, struct pt_regs *regs) {
+        replay_sphere_t *sphere = rtcb->sphere;
+        uint32_t thread_id = rtcb->thread_id;
+
         mutex_lock(&sphere->mutex);
         if(sphere_is_recording(sphere)) {
                 record_header_locked(sphere, thread_exit_event, thread_id, regs);
@@ -891,7 +894,8 @@ void sphere_thread_exit(replay_sphere_t *sphere, uint32_t thread_id, struct pt_r
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         // XXX FIXME we need some way to associate this with a thread
-        perf_counter_term();
+        perf_counter_term(rtcb->pevent);
+        rtcb->pevent = NULL;
 #endif
 
         mutex_unlock(&sphere->mutex);
@@ -948,13 +952,14 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
                         sphere_set_breakpoint(current->rtcb->chunk->ip);
-                        perf_counter_init();                        
-                        current->rtcb->perf_count = perf_counter_read();
+                        current->rtcb->pevent = perf_counter_init(current);
+                        current->rtcb->perf_count = perf_counter_read(current->rtcb->pevent);
                 #endif
                 } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                        current->rtcb->pevent = perf_counter_init(current);
                         sphere_set_breakpoint(current->rtcb->chunk->ip);
                 #endif
                 }
@@ -994,7 +999,6 @@ void sphere_chunk_end(struct task_struct *tsk) {
                 }
         }
 
-        printk(KERN_CRIT "chunk done inst_count = %u\n", rtcb->chunk->inst_count);
         rtcb->chunk = NULL;
         kfree(chunk);
 }
