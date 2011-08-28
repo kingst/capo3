@@ -541,7 +541,6 @@ static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
         u32 num_inst;
         u32 rem = 0;
 
-
         perf_count = perf_counter_read();
         num_inst = perf_count - rtcb->perf_count;
         if(num_inst > chunk->inst_count) {
@@ -552,6 +551,7 @@ static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
                 chunk->inst_count -= num_inst;
         }
         rtcb->perf_count = perf_count;
+
 
         return rem;
 }
@@ -589,6 +589,7 @@ void rr_switch_to(struct task_struct *next_p) {
                 chunk = next_p->rtcb->chunk;
                 BUG_ON(sphere == NULL);
                 if(sphere_is_chunk_replaying(sphere) && (chunk != NULL)) {
+                        task_pt_regs(next_p)->flags &= ~X86_EFLAGS_RF;
                         sphere_set_breakpoint(chunk->ip);
                         next_p->rtcb->perf_count = perf_counter_read();
                 }
