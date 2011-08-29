@@ -433,6 +433,9 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip) {
+        int ret;
+        unsigned char inst;
+
         // XX FIXME make sure that this debug regiter is not being used and that we aren't
         // trampling someone else's use of the other debug registers
         BUG_ON(ip >= PAGE_OFFSET);
@@ -441,7 +444,15 @@ void sphere_set_breakpoint(unsigned long ip) {
                 set_debugreg(0, 0);
         } else {
                 set_debugreg(ip, 0);
-                set_debugreg(0x1, 7);
+                set_debugreg(0x1, 7);                
+                ret = access_process_vm(current, ip, &inst, 1, 0);
+                if(ret == 1) {
+                        if(inst != 0xcc)
+                                current->rtcb->saved_inst = inst;
+                        inst = 0xcc;
+                        ret = access_process_vm(current, ip, &inst, 1, 1);
+                        BUG_ON(ret != 1);
+                }
         }
 }
 #endif
@@ -522,7 +533,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         if(PRINT_DEBUG) {
                 printk(KERN_CRIT "thread_id = %u\n", thread_id);
                 if((event == syscall_enter_event) || (event == syscall_exit_event)) {
-                        printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
+                        printk(KERN_CRIT "syscall event (tid=%u) %u, orig_ax = %lu\n", thread_id, event, regs_syscallno(regs));
                 } else {
                         printk(KERN_CRIT "event %u\n", event);
                 }
@@ -608,6 +619,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         uint32_t idx, i, me;
 
         BUG_ON(rtcb->chunk != NULL);
+        printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
 
         while(!is_next_chunk(sphere, rtcb->thread_id))
                 cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
@@ -627,6 +639,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         rtcb->my_ticket = sphere->next_tickets[me];
         sphere->next_tickets[me] += 1;
 
+        printk(KERN_CRIT "my ticket = %u %u tid=%u\n", rtcb->my_ticket, atomic_read(&sphere->cur_tickets[me]), rtcb->thread_id);
         mutex_unlock(&sphere->mutex);
 
         // wait until I see my ticket
@@ -634,6 +647,8 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
                 wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) == rtcb->my_ticket));
         if (atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket) 
                 BUG();
+
+        printk(KERN_CRIT "done with ticket\n");
 
         // now wait on tokens from predecessor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
@@ -644,7 +659,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
-        printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *) chunk->ip);
+        printk(KERN_CRIT "chunk begin tid = %u ip = 0x%p\n", rtcb->thread_id, (void *) chunk->ip);
 }
 
 
@@ -991,6 +1006,8 @@ void sphere_chunk_end(struct task_struct *tsk) {
         // signal the next ticket
         atomic_inc(&sphere->cur_tickets[me]);
         wake_up_all(&sphere->tickets_wait_queue);
+
+        printk(KERN_CRIT "chunk end, tick now %u tid=%u\n", atomic_read(&sphere->cur_tickets[me]), rtcb->thread_id);
 
         // signal the successor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {

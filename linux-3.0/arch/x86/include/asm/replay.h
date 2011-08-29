@@ -128,6 +128,7 @@ typedef struct replay_thread_control_block {
         int needs_chunk_start;
         uint64_t perf_count;
         struct perf_event *pevent;
+        unsigned char saved_inst;
 } rtcb_t;
 
 // kernel callback function types

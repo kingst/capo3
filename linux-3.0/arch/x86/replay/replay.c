@@ -108,9 +108,45 @@ static int get_signr(rtcb_t *rtcb) {
         return -1;       
 }
 
+static int check_for_end_of_chunk(rtcb_t *rtcb) {
+        u32 inst_count;
+        u64 perf_count;
+        int ret;
+
+        perf_count = perf_counter_read(rtcb->pevent);
+        inst_count = perf_count - rtcb->perf_count;
+        
+        if((inst_count+15) >= rtcb->chunk->inst_count) {
+                if(inst_count > rtcb->chunk->inst_count) {
+                        printk(KERN_CRIT "went past by %u inst\n",
+                               inst_count - rtcb->chunk->inst_count);
+                } else if(inst_count < rtcb->chunk->inst_count) {
+                        printk(KERN_CRIT "stil had %u inst to go\n",
+                               rtcb->chunk->inst_count - inst_count);
+                }
+                
+                ret = access_process_vm(current, rtcb->chunk->ip, &(rtcb->saved_inst), 1, 1);
+                BUG_ON(ret != 1);
+                
+                
+                rtcb->perf_count = perf_count;
+                // assuming the last chunk is from a syscall exit, the the thread exit call
+                // end the chunk
+                if(rtcb->chunk->ip != 1) {
+                        sphere_chunk_end(current);
+                        sphere_chunk_begin(current);
+                        sphere_set_breakpoint(current->rtcb->chunk->ip);
+                }
+
+                return 1;
+        }
+
+        return 0;
+}
+
 static void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
-
+ 
         sanity_check(current);
 
         rtcb = current->rtcb;
@@ -141,6 +177,14 @@ static void rr_syscall_enter(struct pt_regs *regs) {
                 record_header(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
         } else {
                 replay_event(rtcb->sphere, syscall_enter_event, rtcb->thread_id, regs);
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                if(sphere_is_chunk_replaying(rtcb->sphere)) {
+                        if(rtcb->chunk->ip == regs->ip) {
+                                check_for_end_of_chunk(rtcb);
+                        }
+                }
+#endif
+
         }
 }
 
@@ -336,27 +380,6 @@ static void rr_thread_exit(struct pt_regs *regs) {
         kfree(rtcb);
 }
 
-#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
-static u32 update_perf_count(rtcb_t *rtcb, chunk_t *chunk) {
-        u64 perf_count;
-        u32 num_inst;
-        u32 rem = 0;
-
-        perf_count = perf_counter_read(rtcb->pevent);
-        num_inst = perf_count - rtcb->perf_count;
-        if(num_inst > chunk->inst_count) {
-                rem = num_inst - chunk->inst_count;
-                printk(KERN_CRIT "warning, counted %u too many instructions in chunk\n", rem);
-                chunk->inst_count = 0;
-        } else {
-                chunk->inst_count -= num_inst;
-        }
-        rtcb->perf_count = perf_count;
-
-        return rem;
-}
-#endif
-
 static void rr_switch_from(struct task_struct *prev_p) {
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
@@ -365,7 +388,9 @@ static void rr_switch_from(struct task_struct *prev_p) {
 
                 if(chunk != NULL) {
                         get_debugreg(dr7, 7);
-                        BUG_ON((dr7 & 0xf) != 0x1);                        
+                        if(((dr7 & 0xf) != 0x1) && !prev_p->rtcb->needs_chunk_start) {
+                                printk("BUG!!!!!!!! breakpoint not set\n");
+                        }
                         sphere_set_breakpoint(0);
                 }
         }
@@ -441,8 +466,7 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
         int step = 0;
-        u32 inst_count;
-        u64 perf_count;
+        int ret;
 
         if(rtcb == NULL)
                 return 0;
@@ -455,21 +479,11 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         if(dr6 & 1) {
                 BUG_ON(regs->ip != rtcb->chunk->ip);
-                perf_count = perf_counter_read(rtcb->pevent);
-                inst_count = perf_count - rtcb->perf_count;
 
-                printk(KERN_CRIT "****** breakpoint (tid=%u), inst count = %u %u\n", 
-                       rtcb->thread_id, rtcb->chunk->inst_count, inst_count);
+                printk(KERN_CRIT "****** breakpoint (tid=%u)\n", 
+                       rtcb->thread_id);
 
-                if(inst_count >= rtcb->chunk->inst_count) {
-                        if(inst_count > rtcb->chunk->inst_count) {
-                                printk(KERN_CRIT "went past by %u inst\n",
-                                       inst_count - rtcb->chunk->inst_count);
-                        }
-                        rtcb->perf_count = perf_count;
-                        sphere_chunk_end(current);
-                        sphere_chunk_begin(current);
-                        sphere_set_breakpoint(current->rtcb->chunk->ip);
+                if(check_for_end_of_chunk(rtcb)) {
                         // this chunk will refer to the new chunk that just got loaded
                         if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;
@@ -484,6 +498,8 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
                         // to by the breakpoint without causing a breakpoint
                         // exception
                         regs->flags |= X86_EFLAGS_RF;
+                        ret = access_process_vm(current, regs->ip, &(rtcb->saved_inst), 1, 1);
+                        BUG_ON(ret != 1);
                 }
         } else {
                 BUG();
