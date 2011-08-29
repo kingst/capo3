@@ -127,6 +127,7 @@ SYSCALL_DEFINE2(dup2, unsigned int, oldfd, unsigned int, newfd)
 	}
 	return sys_dup3(oldfd, newfd, 0);
 }
+EXPORT_SYMBOL_GPL(sys_dup2);
 
 SYSCALL_DEFINE1(dup, unsigned int, fildes)
 {

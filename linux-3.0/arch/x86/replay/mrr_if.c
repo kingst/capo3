@@ -196,14 +196,3 @@ void mrr_switch_to_replay(struct task_struct *tsk) {
     prepare_mrr_replay(tsk);
 }
 
-
-static int __init replay_mrr_if_init(void) {
-    set_mrr_buffer_full_handler_cb(&mrr_buffer_full_handler);
-    printk(KERN_INFO "set the mrr_buffer_full_handler call back");
-    set_mrr_chunk_done_handler_cb(&mrr_chunk_done_handler);
-    printk(KERN_INFO "set the mrr_chunk_done_handler call back");
-	return 0;
-}
-
-
-module_init(replay_mrr_if_init);

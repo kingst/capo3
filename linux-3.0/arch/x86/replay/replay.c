@@ -473,7 +473,6 @@ static void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
-EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 
@@ -735,6 +734,10 @@ static int __init replay_init(void) {
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         set_rr_do_debug_cb(rr_do_debug);
 #endif
+#ifdef CONFIG_MRR
+        set_mrr_buffer_full_handler_cb(mrr_buffer_full_handler);
+        set_mrr_chunk_done_handler_cb(mrr_chunk_done_handler);
+#endif
 
     	return 0;
 }
@@ -756,6 +759,10 @@ static void __exit replay_exit(void) {
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         set_rr_do_debug_cb(NULL);
 #endif
+#ifdef CONFIG_MRR
+        set_mrr_buffer_full_handler_cb(NULL);
+        set_mrr_chunk_done_handler_cb(NULL);
+#endif
 
         if(!IS_ERR(replay_class)) {
                 for(idx = 0; idx < NUM_REPLAY_MINOR; idx++)
@@ -776,7 +783,7 @@ module_exit(replay_exit);
 
 MODULE_AUTHOR("Sam King");
 MODULE_DESCRIPTION("Provides control of replay hardware.");
-MODULE_LICENSE("BSD");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(REPLAY_VERSION);
 
 /**********************************************************************************************/
