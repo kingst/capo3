@@ -42,6 +42,17 @@
 **========================================================== 
 */
 
+/*
+ * Overall there are two key ordering constraints we need to enforce.  First,
+ * we need to make sure that per processor entries are processed serially and
+ * in chunk log order.  Second, we need to ensure that per thread entries are
+ * also in processed in chunk log order.  To enforce these contraints we use
+ * per processor queues and only clear chunks from the per processor queue
+ * after a thread has finished with the chunk.  To enforce per thread ordering
+ * constraints we use a ticket mechanism where each chunk is given a per thread
+ * ticket, and threads can only grab a chunk when the ticket matches.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -65,7 +76,13 @@
 
 #include <asm/replay.h>
 
-#define DMUX_BUF_SIZE 4096
+#define DEMUX_BUF_SIZE 4096
+
+typedef struct demux_chunk_struct {
+        chunk_t chunk;
+        uint64_t ticket;
+} demux_chunk_t;
+
 
 demux_t *demux_alloc(void) {
         demux_t *dm = kmalloc(sizeof(demux_t), GFP_KERNEL);
@@ -86,8 +103,8 @@ void demux_reset(demux_t *dm) {
         for(proc_id=0; proc_id < NUM_CHUNK_PROC; proc_id++) {                
                 ent = dm->entries + proc_id;
                 if(ent->buf == NULL) 
-                        ent->buf = kmalloc(DMUX_BUF_SIZE, GFP_KERNEL);
-                kfifo_init(&ent->fifo, ent->buf, DMUX_BUF_SIZE);
+                        ent->buf = kmalloc(DEMUX_BUF_SIZE, GFP_KERNEL);
+                kfifo_init(&ent->fifo, ent->buf, DEMUX_BUF_SIZE);
                 cond_init(&ent->fifo_full_cond);
         }
 }
@@ -97,54 +114,88 @@ void demux_free(demux_t *dm) {
 }
 
 
+static uint64_t alloc_next_ticket(demux_t *dm, uint32_t thread_id) {
+        uint64_t ticket;
+        uint32_t idx = thread_id-1;
+        BUG_ON(idx >= NUM_CHUNK_PROC);
+
+        ticket = dm->next_ticket[idx];
+        dm->next_ticket[idx]++;
+        
+        return ticket;
+}
+
+static uint64_t get_current_ticket(demux_t *dm, uint32_t thread_id) {
+        uint32_t idx = thread_id-1;
+        BUG_ON(idx >= NUM_CHUNK_PROC);
+        
+        return dm->curr_ticket[idx];
+}
+
+static void inc_current_ticket(demux_t *dm, uint32_t thread_id) {
+        uint32_t idx = thread_id-1;
+        BUG_ON(idx >= NUM_CHUNK_PROC);
+        dm->curr_ticket[idx]++;
+}
+
 int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mutex *mutex) {
-        chunk_t *chunk = kmalloc(sizeof(chunk_t), GFP_KERNEL);
+        demux_chunk_t *dchunk = kmalloc(sizeof(demux_chunk_t), GFP_KERNEL);
+        chunk_t *chunk;
         int ret = 0;
         demux_ent_t *ent = NULL;
 
-        BUG_ON(chunk == NULL);
+        BUG_ON(dchunk == NULL);
+
+        chunk = &dchunk->chunk;
 
         while(count >= sizeof(chunk_t)) {
+                // the usermode program is going to operate on chunk_t structures
+                // read these in
                 if(copy_from_user(chunk, buf, sizeof(chunk_t))) {
                         kfree(chunk);
                         return -EFAULT;
                 }                
 
                 ret += sizeof(chunk_t);
+                count -= sizeof(chunk_t);
+
+                // the kernel fifo operates on demux_chunk_t structures
+                // which include tickets
                 BUG_ON(chunk->processor_id >= NUM_CHUNK_PROC);
                 ent = dm->entries + chunk->processor_id;
+                dchunk->ticket = alloc_next_ticket(dm, chunk->thread_id);
 
-                while(kfifo_avail(&ent->fifo) < sizeof(chunk_t))
+                while(kfifo_avail(&ent->fifo) < sizeof(demux_chunk_t))
                         cond_wait(&ent->fifo_full_cond, mutex);
-
-                kfifo_in(&ent->fifo, chunk, sizeof(chunk_t));
-                if(kfifo_len(&ent->fifo) == sizeof(chunk_t))
+                
+                kfifo_in(&ent->fifo, dchunk, sizeof(demux_chunk_t));
+                if(kfifo_len(&ent->fifo) == sizeof(demux_chunk_t))
                         cond_broadcast(&dm->next_chunk_cond);
-
-                count -= sizeof(chunk_t);
         }
 
-        kfree(chunk);
+        kfree(dchunk);
 
         return ret;
 }
 
-static int has_chunk(demux_t *dm, uint32_t thread_id, chunk_t *chunk) {
+static int has_chunk(demux_t *dm, uint32_t thread_id, demux_chunk_t *dchunk) {
         uint32_t proc_id;
         int ret;
         demux_ent_t *ent;
+        uint64_t curr_ticket;
 
+        curr_ticket = get_current_ticket(dm, thread_id);
         for(proc_id = 0; proc_id < NUM_CHUNK_PROC; proc_id++) {
                 ent = dm->entries + proc_id;
 
-                if(kfifo_len(&ent->fifo) >= sizeof(chunk_t)) {
+                if(kfifo_len(&ent->fifo) >= sizeof(demux_chunk_t)) {
                         // leave the chunk in place on the queue to make sure
                         // that no other threads execute on behalf of this
                         // processor until we are done
-                        ret = kfifo_out_peek(&ent->fifo, chunk, sizeof(chunk_t));
-                        BUG_ON(ret != sizeof(chunk_t));
-                        BUG_ON(chunk->processor_id != proc_id);
-                        if(thread_id == chunk->thread_id)
+                        ret = kfifo_out_peek(&ent->fifo, dchunk, sizeof(demux_chunk_t));
+                        BUG_ON(ret != sizeof(demux_chunk_t));
+                        BUG_ON(dchunk->chunk.processor_id != proc_id);
+                        if((thread_id == dchunk->chunk.thread_id) && (curr_ticket == dchunk->ticket))
                                 return 1;
                 }
         }
@@ -153,12 +204,18 @@ static int has_chunk(demux_t *dm, uint32_t thread_id, chunk_t *chunk) {
 }
 
 chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex) {
+        demux_chunk_t *dchunk;
         chunk_t *chunk;
 
-        chunk = kmalloc(sizeof(chunk_t), GFP_KERNEL);
-        memset(chunk, 0, sizeof(chunk_t));
+        dchunk = kmalloc(sizeof(demux_chunk_t), GFP_KERNEL);
+        memset(dchunk, 0, sizeof(demux_chunk_t));
 
-        while(!has_chunk(dm, thread_id, chunk))
+        chunk = &dchunk->chunk;
+        // the calling code is going to call kfree on the chunk so it has
+        // to be at the beginning of the dchunk
+        BUG_ON(chunk != (chunk_t *) dchunk);
+
+        while(!has_chunk(dm, thread_id, dchunk))
                 cond_wait(&dm->next_chunk_cond, mutex);
 
         return chunk;
@@ -168,13 +225,15 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
 void demux_chunk_end(demux_t *dm, struct mutex *mutex, chunk_t *chunk) {
         demux_ent_t *ent;
         int ret;
+        demux_chunk_t *dchunk = (demux_chunk_t *) chunk;
 
         ent = dm->entries + chunk->processor_id;
 
         // clear the chunk we just processed so that the next chunk can run on
         // this processor
-        ret = kfifo_out(&ent->fifo, chunk, sizeof(chunk_t));
-        BUG_ON(ret != sizeof(chunk_t));
+        ret = kfifo_out(&ent->fifo, dchunk, sizeof(demux_chunk_t));
+        BUG_ON(ret != sizeof(demux_chunk_t));
+        inc_current_ticket(dm, dchunk->chunk.thread_id);
 
         cond_broadcast(&dm->next_chunk_cond);
         cond_signal(&ent->fifo_full_cond);

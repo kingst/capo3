@@ -444,6 +444,7 @@ void sphere_set_breakpoint(unsigned long ip) {
         } else {
                 set_debugreg(ip, 0);
                 set_debugreg(0x1, 7);                
+#ifdef DEBUG_BREAKPOINTS
                 ret = access_process_vm(current, ip, &inst, 1, 0);
                 if(ret == 1) {
                         if(inst != 0xcc)
@@ -452,6 +453,7 @@ void sphere_set_breakpoint(unsigned long ip) {
                         ret = access_process_vm(current, ip, &inst, 1, 1);
                         BUG_ON(ret != 1);
                 }
+#endif
         }
 }
 #endif

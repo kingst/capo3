@@ -86,6 +86,9 @@ typedef struct demux_entry {
 typedef struct demux {
         demux_ent_t entries[NUM_CHUNK_PROC];
         cond_t next_chunk_cond;
+
+        uint64_t next_ticket[NUM_CHUNK_PROC];
+        uint64_t curr_ticket[NUM_CHUNK_PROC];
 } demux_t;
 
 typedef struct replay_sphere {

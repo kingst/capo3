@@ -112,7 +112,6 @@ static int get_signr(rtcb_t *rtcb) {
 static int check_for_end_of_chunk(rtcb_t *rtcb) {
         u32 inst_count;
         u64 perf_count;
-        int ret;
 
         perf_count = perf_counter_read(rtcb->pevent);
         inst_count = perf_count - rtcb->perf_count;
@@ -126,9 +125,14 @@ static int check_for_end_of_chunk(rtcb_t *rtcb) {
                                rtcb->chunk->inst_count - inst_count);
                 }
                 
-                ret = access_process_vm(current, rtcb->chunk->ip, &(rtcb->saved_inst), 1, 1);
-                BUG_ON(ret != 1);
-                
+#ifdef DEBUG_BREAKPOINTS
+                {
+                        int ret;
+                        ret = access_process_vm(current, rtcb->chunk->ip, &(rtcb->saved_inst), 1, 1);
+                        BUG_ON(ret != 1);
+                }
+#endif                
+
                 
                 rtcb->perf_count = perf_count;
                 // assuming the last chunk is from a syscall exit, the the thread exit call
@@ -467,7 +471,6 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
         rtcb_t *rtcb = current->rtcb;
         unsigned long dr6;
         int step = 0;
-        int ret;
 
         if(rtcb == NULL)
                 return 0;
@@ -499,8 +502,13 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
                         // to by the breakpoint without causing a breakpoint
                         // exception
                         regs->flags |= X86_EFLAGS_RF;
-                        ret = access_process_vm(current, regs->ip, &(rtcb->saved_inst), 1, 1);
-                        BUG_ON(ret != 1);
+#ifdef DEBUG_BREAKPOINTS
+                        {
+                                int ret;
+                                ret = access_process_vm(current, regs->ip, &(rtcb->saved_inst), 1, 1);
+                                BUG_ON(ret != 1);
+                        }
+#endif
                 }
         } else {
                 BUG();
