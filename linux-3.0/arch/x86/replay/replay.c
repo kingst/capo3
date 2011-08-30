@@ -108,6 +108,7 @@ static int get_signr(rtcb_t *rtcb) {
         return -1;       
 }
 
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 static int check_for_end_of_chunk(rtcb_t *rtcb) {
         u32 inst_count;
         u64 perf_count;
@@ -143,6 +144,7 @@ static int check_for_end_of_chunk(rtcb_t *rtcb) {
 
         return 0;
 }
+#endif
 
 static void rr_syscall_enter(struct pt_regs *regs) {
         rtcb_t *rtcb;
@@ -355,7 +357,6 @@ static void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
         rtcb->needs_chunk_start = current != tsk;
-        rtcb->my_ticket = 0;
         rtcb->perf_count = 0;
         rtcb->pevent = NULL;
         tsk->rtcb = rtcb;
@@ -632,8 +633,8 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         } else if(cmd == REPLAY_IOC_START_CHUNKING) {
                 printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
                 ret = sphere_start_replaying(sphere);
+                ret = sphere_start_chunking(sphere);
                 rr_thread_create(current, sphere);
-                ret = sphere_start_chunking(sphere, current->rtcb);
         } else if(cmd == REPLAY_IOC_SET_CHUNK_LOG_FD) {
                 sfd->is_chunk_log_fd = 1;
         } else {

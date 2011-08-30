@@ -77,6 +77,17 @@ static inline unsigned long regs_sp(struct pt_regs *regs) {return regs->sp;}
 
 typedef enum {idle, recording, replaying, done} replay_state_t;
 
+typedef struct demux_entry {
+        struct kfifo fifo;
+        unsigned char *buf;
+        cond_t fifo_full_cond;
+} demux_ent_t;
+
+typedef struct demux {
+        demux_ent_t entries[NUM_CHUNK_PROC];
+        cond_t next_chunk_cond;
+} demux_t;
+
 typedef struct replay_sphere {
         unsigned char *fifo_buffer;
 
@@ -104,16 +115,8 @@ typedef struct replay_sphere {
 
         // for chunk replay
         struct semaphore **proc_sem;
-        unsigned char *chunk_buffer;
-        struct kfifo chunk_fifo;
-        cond_t chunk_queue_full_cond;
-        cond_t chunk_next_record_cond;
-        struct chunk_struct *next_chunk;
+        demux_t *demux;
         int is_chunk_replay;
-        int *next_tickets;
-        atomic_t *cur_tickets;
-        wait_queue_head_t tickets_wait_queue;
-        cond_t cur_tickets_updated;
 } replay_sphere_t;
 
 struct perf_event;
@@ -126,10 +129,13 @@ typedef struct replay_thread_control_block {
         struct chunk_struct *chunk;
         uint32_t my_ticket;
         int needs_chunk_start;
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         uint64_t perf_count;
         struct perf_event *pevent;
         unsigned char saved_inst;
+#endif
 } rtcb_t;
+
 
 // kernel callback function types
 typedef void (*rr_syscall_enter_cb_t)(struct pt_regs *regs);
@@ -160,7 +166,7 @@ int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf,
 // The first thread to record/replay calls these on itself
 int sphere_start_recording(replay_sphere_t *sphere);
 int sphere_start_replaying(replay_sphere_t *sphere);
-int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb);
+int sphere_start_chunking(replay_sphere_t *sphere);
 
 // called from record/replay threads when allocated
 // might be called from context of a different thread
@@ -189,6 +195,13 @@ void sphere_chunk_end(struct task_struct *tsk);
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip);
 #endif
+
+demux_t *demux_alloc(void);
+void demux_reset(demux_t *dm);
+void demux_free(demux_t *dm);
+int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mutex *mutex);
+chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex);
+void demux_chunk_end(demux_t *dm, struct mutex *mutex, chunk_t *chunk);
 
 #endif
 
