@@ -168,6 +168,8 @@ int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mu
                 while(kfifo_avail(&ent->fifo) < sizeof(demux_chunk_t))
                         cond_wait(&ent->fifo_full_cond, mutex);
                 
+                printk(KERN_CRIT "pushing chunk tid=%u, ticket=%llu\n", dchunk->chunk.thread_id, dchunk->ticket);
+                
                 kfifo_in(&ent->fifo, dchunk, sizeof(demux_chunk_t));
                 if(kfifo_len(&ent->fifo) == sizeof(demux_chunk_t))
                         cond_broadcast(&dm->next_chunk_cond);
