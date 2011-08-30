@@ -424,10 +424,10 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("return", regs_return(regs), regs_return(stored_regs));
         check_reg("first", regs_first(regs), regs_first(stored_regs));
         check_reg("second", regs_second(regs), regs_second(stored_regs));
-        check_reg("third", regs_third(regs), regs_third(stored_regs));
+        //check_reg("third", regs_third(regs), regs_third(stored_regs));
         //check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
-        check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
-        check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
+        //check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
+        //check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
@@ -612,6 +612,13 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         BUG_ON(chunk->thread_id != rtcb->thread_id);
         
         me = chunk->processor_id;
+
+        printk(KERN_CRIT "waiting for predecessor chunks to finish tid = %u\n", rtcb->thread_id);
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                printk(KERN_CRIT "proc %u: count = %u sema_count = %u\n",
+                       me, chunk->pred_vec[idx], sphere->proc_sem[idx][me].count);
+        }
+
         mutex_unlock(&sphere->mutex);
 
         // now wait on tokens from predecessor chunks
@@ -677,7 +684,6 @@ replay_sphere_t *sphere_alloc(void) {
 
         sphere->has_fifo_reader = 0;
         sphere->has_fifo_writer = 0;
-        sphere->has_chunk_fifo_writer = 0;
 
         sphere->demux = demux_alloc();
 
@@ -704,8 +710,7 @@ void sphere_reset(replay_sphere_t *sphere) {
         sphere->has_fifo_reader = 0;
         BUG_ON(sphere->has_fifo_writer);
         sphere->has_fifo_writer = 0;
-        BUG_ON(sphere->has_chunk_fifo_writer);
-        sphere->has_chunk_fifo_writer = 0;
+
         // XXX FIXME we should do something to reset the proc_sem semaphores
         // or throw a bug if there are any threads waiting on them or they
         // have values

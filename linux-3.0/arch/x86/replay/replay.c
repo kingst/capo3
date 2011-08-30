@@ -361,8 +361,10 @@ static void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
         rtcb->needs_chunk_start = current != tsk;
+#ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         rtcb->perf_count = 0;
         rtcb->pevent = NULL;
+#endif
         tsk->rtcb = rtcb;
         set_ti_thread_flag(task_thread_info(tsk), TIF_RECORD_REPLAY);
 }
@@ -482,6 +484,7 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
         BUG_ON(!user_mode(regs));
 
         if(dr6 & (1<<14)) {
+                BUG();
                 printk(KERN_CRIT "single step ip = 0x%08lx\n", regs->ip);
                 return 1;
         }
@@ -493,12 +496,14 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
                        rtcb->thread_id);
 
                 if(check_for_end_of_chunk(rtcb)) {
+                        /*
                         if(rtcb->chunk->ip == 0xffffffffff600115) {
                                 printk(KERN_CRIT "enabling single stepping\n");
                                 user_enable_single_step(current);
                                 regs->flags |= X86_EFLAGS_TF;
                                 regs->flags &= ~X86_EFLAGS_RF;
                         }
+                        */
                         // this chunk will refer to the new chunk that just got loaded
                         if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;

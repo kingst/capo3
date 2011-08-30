@@ -76,7 +76,7 @@
 
 #include <asm/replay.h>
 
-#define DEMUX_BUF_SIZE (256*4096)
+#define DEMUX_BUF_SIZE (1024*4096)
 
 typedef struct demux_chunk_struct {
         chunk_t chunk;
