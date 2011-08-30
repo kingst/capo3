@@ -432,12 +432,13 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip) {
-        int ret;
-        unsigned char inst;
+        if((ip < 0xffffffffff600000) || (ip >= 0xffffffffff601000))
+                BUG_ON(ip >= PAGE_OFFSET);
 
         // XX FIXME make sure that this debug regiter is not being used and that we aren't
         // trampling someone else's use of the other debug registers
-        BUG_ON(ip >= PAGE_OFFSET);
+
+
         if(ip == 0) {
                 set_debugreg(0, 7);
                 set_debugreg(0, 0);
@@ -445,13 +446,18 @@ void sphere_set_breakpoint(unsigned long ip) {
                 set_debugreg(ip, 0);
                 set_debugreg(0x1, 7);                
 #ifdef DEBUG_BREAKPOINTS
-                ret = access_process_vm(current, ip, &inst, 1, 0);
-                if(ret == 1) {
-                        if(inst != 0xcc)
-                                current->rtcb->saved_inst = inst;
-                        inst = 0xcc;
-                        ret = access_process_vm(current, ip, &inst, 1, 1);
-                        BUG_ON(ret != 1);
+                {
+                        unsigned char inst;
+                        int ret;
+                        
+                        ret = access_process_vm(current, ip, &inst, 1, 0);
+                        if(ret == 1) {
+                                if(inst != 0xcc)
+                                        current->rtcb->saved_inst = inst;
+                                inst = 0xcc;
+                                ret = access_process_vm(current, ip, &inst, 1, 1);
+                                BUG_ON(ret != 1);
+                        }
                 }
 #endif
         }

@@ -118,8 +118,8 @@ static int check_for_end_of_chunk(rtcb_t *rtcb) {
         
         if((inst_count+15) >= rtcb->chunk->inst_count) {
                 if(inst_count > rtcb->chunk->inst_count) {
-                        printk(KERN_CRIT "went past by %u inst\n",
-                               inst_count - rtcb->chunk->inst_count);
+                        printk(KERN_CRIT "went past by %u inst for %u chunk\n",
+                               inst_count - rtcb->chunk->inst_count, rtcb->chunk->inst_count);
                 } else if(inst_count < rtcb->chunk->inst_count) {
                         printk(KERN_CRIT "stil had %u inst to go\n",
                                rtcb->chunk->inst_count - inst_count);
@@ -481,6 +481,11 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
 
         BUG_ON(!user_mode(regs));
 
+        if(dr6 & (1<<14)) {
+                printk(KERN_CRIT "single step ip = 0x%08lx\n", regs->ip);
+                return 1;
+        }
+
         if(dr6 & 1) {
                 BUG_ON(regs->ip != rtcb->chunk->ip);
 
@@ -488,6 +493,12 @@ static int rr_do_debug(struct pt_regs *regs, long error_code) {
                        rtcb->thread_id);
 
                 if(check_for_end_of_chunk(rtcb)) {
+                        if(rtcb->chunk->ip == 0xffffffffff600115) {
+                                printk(KERN_CRIT "enabling single stepping\n");
+                                user_enable_single_step(current);
+                                regs->flags |= X86_EFLAGS_TF;
+                                regs->flags &= ~X86_EFLAGS_RF;
+                        }
                         // this chunk will refer to the new chunk that just got loaded
                         if((regs->ip == rtcb->chunk->ip) && (rtcb->chunk->inst_count > 0)) {
                                 step = 1;
