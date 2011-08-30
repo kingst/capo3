@@ -82,7 +82,7 @@ typedef struct sphere_file_data {
 } sphere_fd_t;
 
 #define REPLAY_VERSION	"0.3"
-
+#define PRINT_DEBUG 1
 
 /*********************************** Callbacks from kernel ************************************/
 static void sanity_check(struct task_struct *tsk) {
@@ -243,6 +243,7 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
 
         if(signr < 0)
                 return signr;
+        if (PRINT_DEBUG) printk(KERN_CRIT "got signal %d", signr);
 
         switch(signr) {
                 case SIGTERM: 
@@ -275,8 +276,9 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         }
 
         // check if this is an async signal
-        if(!async)
+        if(!async) {
                 return signr;
+        }
 
         BUG_ON(signr >= SIGRTMAX);        
         mask = 1;

@@ -78,7 +78,7 @@
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
 #define CHUNK_BUFFER_SIZE (16*1024)
-#define PRINT_DEBUG 0
+#define PRINT_DEBUG 1
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -231,6 +231,15 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
         if(atomic_read(&sphere->state) != recording)
                 BUG();
 
+        if(PRINT_DEBUG) {
+                printk(KERN_CRIT "thread_id = %u\n", thread_id);
+                if((event == syscall_enter_event) || (event == syscall_exit_event)) {
+                        printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
+                } else {
+                        printk(KERN_CRIT "event %u\n", event);
+                }
+        }
+
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
         if(ret != sizeof(type)) return -1;
         ret = kfifo_in(&sphere->fifo, &thread_id, sizeof(thread_id));
@@ -302,7 +311,7 @@ static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t th
                 my_magic_message_int("waiting for next log entry", thread_id);
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
         }
-        my_magic_message_int("get the next log entry", thread_id);
+        my_magic_message_int("got the next log entry", thread_id);
 
         if((sphere->header == NULL) || (sphere->header->thread_id != thread_id))
                 BUG();
@@ -412,7 +421,6 @@ static int reexecute_syscall(struct pt_regs *regs) {
                 printk(KERN_CRIT "unhandled syscall %lu\n", regs_syscallno(regs));
                 BUG();
                 return 1;
-
         }
 
         return 0;
@@ -596,6 +604,9 @@ static int is_next_chunk(replay_sphere_t *sphere, uint32_t thread_id) {
                         ret = kfifo_out(&sphere->chunk_fifo, sphere->next_chunk, sizeof(chunk_t));
                         if(ret != sizeof(chunk_t))
                                 BUG();
+                        my_magic_message_int("next chunk proc:", sphere->next_chunk->processor_id);
+                        my_magic_message_int("next chunk actor:", sphere->next_chunk->thread_id);
+                        my_magic_message_int("next chunk inst_count:", sphere->next_chunk->inst_count);
                         cond_broadcast(&sphere->chunk_queue_full_cond);
                 }
         }
