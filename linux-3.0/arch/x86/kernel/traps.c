@@ -486,7 +486,8 @@ void restart_nmi(void)
 /* May run on IST stack. */
 dotraplinkage void __kprobes do_int3(struct pt_regs *regs, long error_code)
 {
-        printk(KERN_CRIT "do_int3\n");
+        printk(KERN_CRIT "#################### do_int3 ####################\n");        
+        printk(KERN_CRIT "ip = 0x%p\n", (void *) regs->ip);
 #ifdef CONFIG_KGDB_LOW_LEVEL_TRAP
 	if (kgdb_ll_trap(DIE_INT3, "int3", regs, error_code, 3, SIGTRAP)
 			== NOTIFY_STOP)

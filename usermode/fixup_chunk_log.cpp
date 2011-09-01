@@ -50,7 +50,7 @@
 #include <fcntl.h>
 
 #include <map>
-#include <queue>
+#include <list>
 
 extern "C" {
 #include "util.h"
@@ -62,8 +62,7 @@ int main(int argc, char *argv[]) {
         chunk_t *chunk;
         int idx;
         int fd;
-        queue<chunk_t *> chunk_queue;
-        map<uint32_t, chunk_t *> last_chunk;
+        list<chunk_t *> chunk_list;
 
         if(argc != 2) {
                 fprintf(stderr, "Usage %s: chunk_log_output < chunk.log\n", argv[0]);
@@ -95,25 +94,60 @@ int main(int argc, char *argv[]) {
 
                 fprintf(stderr,"ip           = 0x%p\n", (void *) chunk->ip);
 
+                /*
+
+                */
+
+                chunk_list.insert(chunk_list.end(), chunk);
+                chunk = new chunk_t;
+        }
+        
+        list<chunk_t *>::iterator list_iter;
+        map<uint32_t, chunk_t *> last_chunk;
+
+        // first fill in any zero ip values with the proper IP
+        for(list_iter = chunk_list.begin(); list_iter != chunk_list.end(); list_iter++) {
+                chunk = *list_iter;
+                if(last_chunk.find(chunk->thread_id) != last_chunk.end()) {
+                        assert(chunk->ip != 0);
+                        assert(chunk->inst_count != 0);
+                        assert(last_chunk[chunk->thread_id]->ip == 0);
+                        assert(last_chunk[chunk->thread_id]->inst_count == 0);
+                                
+                        last_chunk[chunk->thread_id]->ip = chunk->ip;
+                        last_chunk.erase(chunk->thread_id);
+                } else if(chunk->ip == 0) {
+                        assert(chunk->inst_count == 0);
+
+                        last_chunk[chunk->thread_id] = chunk;
+                }
+        }
+
+        last_chunk.clear();
+        assert(last_chunk.size() == 0);
+
+        // push the beginning ip for a chunk back to the previous chunk
+        for(list_iter = chunk_list.begin(); list_iter != chunk_list.end(); list_iter++) {
+                chunk = *list_iter;
+
                 if(last_chunk.find(chunk->thread_id) != last_chunk.end()) {
                         last_chunk[chunk->thread_id]->ip = chunk->ip;
                 }
                 last_chunk[chunk->thread_id] = chunk;
-                chunk_queue.push(chunk);
-                chunk = new chunk_t;
         }
 
         map<uint32_t, chunk_t *>::iterator iter;
+        // set the ip to 1 for the last chunk in each thread
         for(iter = last_chunk.begin(); iter != last_chunk.end(); iter++) {
                 iter->second->ip = 1;
         }
 
-        while(chunk_queue.size() > 0) {
-                chunk = chunk_queue.front();
-                chunk_queue.pop();
-
+        // write it out
+        for(list_iter = chunk_list.begin(); list_iter != chunk_list.end(); list_iter++) {
+                chunk = *list_iter;
                 write_bytes(fd, chunk, sizeof(*chunk));
         }
+
 
         return 0;
 }

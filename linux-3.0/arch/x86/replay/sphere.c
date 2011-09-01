@@ -77,8 +77,7 @@
 #include <asm/mrr/simics_if.h>
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
-#define CHUNK_BUFFER_SIZE (16*1024)
-#define PRINT_DEBUG 1
+#define PRINT_DEBUG 0
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -442,23 +441,42 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("return", regs_return(regs), regs_return(stored_regs));
         check_reg("first", regs_first(regs), regs_first(stored_regs));
         check_reg("second", regs_second(regs), regs_second(stored_regs));
-        check_reg("third", regs_third(regs), regs_third(stored_regs));
+        //check_reg("third", regs_third(regs), regs_third(stored_regs));
         //check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
-        check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
-        check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
+        //check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
+        //check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 void sphere_set_breakpoint(unsigned long ip) {
+        if((ip < 0xffffffffff600000) || (ip >= 0xffffffffff601000))
+                BUG_ON(ip >= PAGE_OFFSET);
+
         // XX FIXME make sure that this debug regiter is not being used and that we aren't
         // trampling someone else's use of the other debug registers
-        BUG_ON(ip >= PAGE_OFFSET);
+
+
         if(ip == 0) {
                 set_debugreg(0, 7);
                 set_debugreg(0, 0);
         } else {
                 set_debugreg(ip, 0);
-                set_debugreg(0x1, 7);
+                set_debugreg(0x1, 7);                
+#ifdef DEBUG_BREAKPOINTS
+                {
+                        unsigned char inst;
+                        int ret;
+                        
+                        ret = access_process_vm(current, ip, &inst, 1, 0);
+                        if(ret == 1) {
+                                if(inst != 0xcc)
+                                        current->rtcb->saved_inst = inst;
+                                inst = 0xcc;
+                                ret = access_process_vm(current, ip, &inst, 1, 1);
+                                BUG_ON(ret != 1);
+                        }
+                }
+#endif
         }
 }
 #endif
@@ -540,7 +558,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         if(PRINT_DEBUG) {
                 printk(KERN_CRIT "thread_id = %u\n", thread_id);
                 if((event == syscall_enter_event) || (event == syscall_exit_event)) {
-                        printk(KERN_CRIT "syscall event %u, orig_ax = %lu\n", event, regs_syscallno(regs));
+                        printk(KERN_CRIT "syscall event (tid=%u) %u, orig_ax = %lu\n", thread_id, event, regs_syscallno(regs));
                 } else {
                         printk(KERN_CRIT "event %u\n", event);
                 }
@@ -594,30 +612,6 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
         if(PRINT_DEBUG) printk(KERN_CRIT "thread_id %d done with event\n", thread_id);
 }
 
-static int is_next_chunk(replay_sphere_t *sphere, uint32_t thread_id) {
-        int len, ret;
-
-        if(sphere->next_chunk == NULL) {
-                len = kfifo_len(&sphere->chunk_fifo);
-                if(len >= sizeof(chunk_t)) {
-                        sphere->next_chunk = kmalloc(sizeof(chunk_t), GFP_KERNEL);
-                        ret = kfifo_out(&sphere->chunk_fifo, sphere->next_chunk, sizeof(chunk_t));
-                        if(ret != sizeof(chunk_t))
-                                BUG();
-                        my_magic_message_int("next chunk proc:", sphere->next_chunk->processor_id);
-                        my_magic_message_int("next chunk actor:", sphere->next_chunk->thread_id);
-                        my_magic_message_int("next chunk inst_count:", sphere->next_chunk->inst_count);
-                        cond_broadcast(&sphere->chunk_queue_full_cond);
-                }
-        }
-
-        if(sphere->next_chunk != NULL)
-                return sphere->next_chunk->thread_id == thread_id;
-        
-
-        return 0;
-        
-}
 
 /*
  * Do not put any chunk-counting stuff in this function.
@@ -629,43 +623,20 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         uint32_t idx, i, me;
 
         BUG_ON(rtcb->chunk != NULL);
+        printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
 
-#ifdef CONFIG_MRR
-        rtcb->is_in_chunk_begin = 1;
-#endif
-
-        my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
-        while(!is_next_chunk(sphere, rtcb->thread_id)) {
-                my_magic_message_int("waiting for next chunk entry", rtcb->thread_id);
-                cond_wait(&sphere->chunk_next_record_cond, &sphere->mutex);
-        }
-        my_magic_message_int("got the next chunk entry", rtcb->thread_id);
-        my_magic_message_int("next chunk entry size:", sphere->next_chunk->inst_count);
-
-        BUG_ON((sphere->next_chunk == NULL) || (sphere->next_chunk->thread_id != rtcb->thread_id));
-
-        chunk = sphere->next_chunk;
-        sphere->next_chunk = NULL;        
+        chunk = demux_chunk_begin(sphere->demux, rtcb->thread_id, &sphere->mutex);
+        BUG_ON(chunk->thread_id != rtcb->thread_id);
         
         me = chunk->processor_id;
-        cond_broadcast(&sphere->chunk_next_record_cond);
 
-        // we should make sure that chunks from the 
-        // same recorded cpu execute in the order 
-        // that they show up in the chunks log.
-        // to enforce this, we use a simple ticketing mechanism
-        my_magic_message_int("getting my ticket", rtcb->thread_id);
-        rtcb->my_ticket = sphere->next_tickets[me];
-        sphere->next_tickets[me] += 1;
+        printk(KERN_CRIT "waiting for predecessor chunks to finish tid = %u\n", rtcb->thread_id);
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                printk(KERN_CRIT "proc %u: count = %u sema_count = %u\n",
+                       me, chunk->pred_vec[idx], sphere->proc_sem[idx][me].count);
+        }
 
         mutex_unlock(&sphere->mutex);
-
-        // wait until I see my ticket
-        my_magic_message_int("waiting for my ticket", rtcb->thread_id);
-        while(atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket)
-                wait_event(sphere->tickets_wait_queue, (atomic_read(&sphere->cur_tickets[me]) == rtcb->my_ticket));
-        if (atomic_read(&sphere->cur_tickets[me]) != rtcb->my_ticket) 
-                BUG();
 
         // now wait on tokens from predecessor chunks
         my_magic_message_int("before semaphores", rtcb->thread_id);
@@ -678,10 +649,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
-        printk(KERN_CRIT "chunk begin ip = 0x%p\n", (void *) chunk->ip);
-#ifdef CONFIG_MRR
-        rtcb->is_in_chunk_begin = 0;
-#endif
+        printk(KERN_CRIT "chunk begin tid = %u ip = 0x%p\n", rtcb->thread_id, (void *) chunk->ip);
 }
 
 
@@ -712,13 +680,6 @@ replay_sphere_t *sphere_alloc(void) {
                 return NULL;
         }
 
-        sphere->chunk_buffer = vmalloc(CHUNK_BUFFER_SIZE);
-        if(sphere->chunk_buffer == NULL) {
-                vfree(sphere->fifo_buffer);
-                kfree(sphere);
-                BUG();
-                return NULL;
-        }
 
         kfifo_init(&sphere->fifo, sphere->fifo_buffer, LOG_BUFFER_SIZE);
         cond_init(&sphere->queue_full_cond);
@@ -728,9 +689,6 @@ replay_sphere_t *sphere_alloc(void) {
         atomic_set(&sphere->fd_count, 0);
         sphere->header = NULL;
 
-        kfifo_init(&sphere->chunk_fifo, sphere->chunk_buffer, CHUNK_BUFFER_SIZE);
-        cond_init(&sphere->chunk_queue_full_cond);
-        cond_init(&sphere->chunk_next_record_cond);
         // XXX FIXME check allocation errors
         sphere->proc_sem = (struct semaphore **) 
                 kmalloc(NUM_CHUNK_PROC*sizeof(struct semaphore *), GFP_KERNEL);
@@ -741,22 +699,12 @@ replay_sphere_t *sphere_alloc(void) {
                         sema_init(&sphere->proc_sem[i][j], 0);
                 }
         }
-        sphere->next_chunk = NULL;
         sphere->is_chunk_replay = 0;
 
         sphere->has_fifo_reader = 0;
         sphere->has_fifo_writer = 0;
-        sphere->has_chunk_fifo_writer = 0;
 
-        // tickets
-        sphere->next_tickets = kmalloc(NUM_CHUNK_PROC*sizeof(int), GFP_KERNEL);
-        sphere->cur_tickets = kmalloc(NUM_CHUNK_PROC*sizeof(atomic_t), GFP_KERNEL);
-        init_waitqueue_head(&sphere->tickets_wait_queue);
-        cond_init(&sphere->cur_tickets_updated);
-        for(i = 0; i < NUM_CHUNK_PROC; i++) {
-            sphere->next_tickets[i] = 0;
-            atomic_set(&sphere->cur_tickets[i], 0);
-        }
+        sphere->demux = demux_alloc();
 
         mutex_init(&sphere->mutex);
 
@@ -764,8 +712,6 @@ replay_sphere_t *sphere_alloc(void) {
 }
 
 void sphere_reset(replay_sphere_t *sphere) {
-        int i;
-
         mutex_lock(&sphere->mutex);
 
         if(sphere->num_threads > 0)
@@ -779,25 +725,16 @@ void sphere_reset(replay_sphere_t *sphere) {
         sphere->fifo_head_ctu_buf = 0;
         sphere->is_chunk_replay = 0;
 
-        if(kfifo_len(&sphere->chunk_fifo) > 0)
-                printk(KERN_CRIT "Warning, chunk fifo still has data.....\n");
-        kfifo_init(&sphere->chunk_fifo, sphere->chunk_buffer, CHUNK_BUFFER_SIZE);
-
         BUG_ON(sphere->has_fifo_reader);
         sphere->has_fifo_reader = 0;
         BUG_ON(sphere->has_fifo_writer);
         sphere->has_fifo_writer = 0;
-        BUG_ON(sphere->has_chunk_fifo_writer);
-        sphere->has_chunk_fifo_writer = 0;
+
         // XXX FIXME we should do something to reset the proc_sem semaphores
         // or throw a bug if there are any threads waiting on them or they
         // have values
 
-        // reset tickets
-        for(i = 0; i < NUM_CHUNK_PROC; i++) {
-            sphere->next_tickets[i] = 0;
-            atomic_set(&sphere->cur_tickets[i], 0);
-        }
+        demux_reset(sphere->demux);
 
         mutex_unlock(&sphere->mutex);
 }
@@ -845,9 +782,7 @@ int sphere_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_
 int sphere_chunk_fifo_from_user(replay_sphere_t *sphere, const char __user *buf, size_t count) {
         int ret;
         mutex_lock(&sphere->mutex);
-        ret = sphere_fifo_from_user_ll(sphere, buf, count, &sphere->chunk_fifo, 
-                                       &sphere->chunk_queue_full_cond, &sphere->chunk_next_record_cond,
-                                       &sphere->has_chunk_fifo_writer);
+        ret = demux_from_user(sphere->demux, buf, count, &sphere->mutex);
         mutex_unlock(&sphere->mutex);
         return ret;
 }
@@ -883,14 +818,13 @@ int sphere_start_replaying(replay_sphere_t *sphere) {
         return ret;
 }
 
-int sphere_start_chunking(replay_sphere_t *sphere, rtcb_t *rtcb) {
+int sphere_start_chunking(replay_sphere_t *sphere) {
         int ret = 0;
 
         mutex_lock(&sphere->mutex);
         BUG_ON(!sphere_is_replaying(sphere));
         my_magic_message("started chunking");
         sphere->is_chunk_replay = 1;
-        rtcb->chunk = NULL;
         mutex_unlock(&sphere->mutex);
 
         return ret;
@@ -1038,22 +972,18 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         mutex_unlock(&sphere->mutex);
 }
 
-/*
- * this function does not need to lock the sphere.
- * all of its functionality is thread-local. 
- * Please keep it this way.
- */
 void sphere_chunk_end(struct task_struct *tsk) {
         uint32_t idx, i, me;
         rtcb_t *rtcb = tsk->rtcb;
         replay_sphere_t *sphere = rtcb->sphere;
         chunk_t *chunk = rtcb->chunk;
 
-        me = chunk->processor_id;
-
+        // FIXME
+        //mutex_lock(&sphere->mutex);
         // signal the next ticket
-        atomic_inc(&sphere->cur_tickets[me]);
-        wake_up_all(&sphere->tickets_wait_queue);
+        me = chunk->processor_id;
+        demux_chunk_end(sphere->demux, &sphere->mutex, chunk);        
+        //mutex_unlock(&sphere->mutex);
 
         // signal the successor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {

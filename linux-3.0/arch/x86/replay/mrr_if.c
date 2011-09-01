@@ -25,7 +25,6 @@ static void prepare_mrr_record(struct task_struct *tsk) {
 
 
 static void prepare_mrr_replay(struct task_struct *tsk) {
-
     rtcb_t *rtcb = tsk->rtcb;
     replay_sphere_t *sphere = rtcb->sphere;
 
@@ -34,23 +33,16 @@ static void prepare_mrr_replay(struct task_struct *tsk) {
         set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
         mrr_set_replay();
 
-        // get the next chunk from the log, if necessary, and set the target chunk size
-        // care must be taken here since there might be a race between
-        // this invocation of sphere_chunk_begin() and a previous call
-        // to the same function that caused a context switch and is still
-        // in progress.
-
-        if (NULL == rtcb->chunk && !rtcb->is_in_chunk_begin) {
-            sphere_chunk_begin(tsk);
-            BUG_ON(NULL == rtcb->chunk);
-        }
-
+        // if we already have a chunk, set its chunk size in the processor
+        // otherwise, let the code that will call chunk_begin, set the 
+        // chunk size, as well
         if (NULL != rtcb->chunk) {
             BUG_ON(0 == rtcb->chunk->inst_count);
             mrr_set_target_chunk_size(rtcb->chunk->inst_count);
         }
     }
 }
+
 
 /*
  * For recording mode. this function will have the processor 

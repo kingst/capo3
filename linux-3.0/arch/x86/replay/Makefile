@@ -5,7 +5,7 @@ obj-m   :=  rr.o
 endif
 
 ifdef CONFIG_RECORD_REPLAY
-rr-objs	+=  replay.o sphere.o
+rr-objs	+=  replay.o sphere.o demux.o
 endif
 
 ifdef CONFIG_RR_CHUNKING_PERFCOUNT

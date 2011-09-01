@@ -50,11 +50,20 @@
 #define __syscall_clobber "r11","cx","memory"
 
 DEFINE_VVAR(int, vgetcpu_mode);
+
+#ifdef CONFIG_RECORD_REPLAY
+DEFINE_VVAR(struct vsyscall_gtod_data, vsyscall_gtod_data) =
+{
+	.lock = __SEQLOCK_UNLOCKED(__vsyscall_gtod_data.lock),
+	.sysctl_enabled = 0,
+};
+#else
 DEFINE_VVAR(struct vsyscall_gtod_data, vsyscall_gtod_data) =
 {
 	.lock = __SEQLOCK_UNLOCKED(__vsyscall_gtod_data.lock),
 	.sysctl_enabled = 1,
 };
+#endif
 
 void update_vsyscall_tz(void)
 {

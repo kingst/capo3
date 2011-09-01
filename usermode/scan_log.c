@@ -74,8 +74,8 @@ int main(int argc, char *argv[]) {
                 assert(ret == sizeof(header));
                 printf("%u ", header.thread_id);
                 if(header.type == syscall_enter_event) {
-                        printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx\n",
-                               header.regs.orig_rax, header.regs.rdi);
+                        printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx ip = 0x%08lx\n",
+                               header.regs.orig_rax, header.regs.rdi, header.regs.rip);
                 } else if(header.type == syscall_exit_event) {
                         printf("syscall_exit_event, syscall = %ld ret = %ld\n",
                                header.regs.orig_rax, header.regs.rax);
