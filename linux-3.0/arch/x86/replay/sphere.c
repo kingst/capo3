@@ -922,7 +922,8 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
-#ifdef CONFIG_MRR        
+
+#ifdef CONFIG_MRR
         int start_mrr = 0;
 #endif
 
@@ -972,18 +973,19 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         mutex_unlock(&sphere->mutex);
 }
 
+/*
+ * This function is thread-safe.
+ * As an invariant, it should not call any sleeping
+ * functions, like mutex_lock.
+ */
 void sphere_chunk_end(struct task_struct *tsk) {
         uint32_t idx, i, me;
         rtcb_t *rtcb = tsk->rtcb;
         replay_sphere_t *sphere = rtcb->sphere;
         chunk_t *chunk = rtcb->chunk;
 
-        // FIXME
-        //mutex_lock(&sphere->mutex);
-        // signal the next ticket
         me = chunk->processor_id;
         demux_chunk_end(sphere->demux, &sphere->mutex, chunk);        
-        //mutex_unlock(&sphere->mutex);
 
         // signal the successor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {

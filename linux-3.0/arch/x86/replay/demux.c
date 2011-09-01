@@ -128,15 +128,14 @@ static uint64_t alloc_next_ticket(demux_t *dm, uint32_t thread_id) {
 
 static uint64_t get_current_ticket(demux_t *dm, uint32_t thread_id) {
         uint32_t idx = thread_id-1;
-        BUG_ON(idx >= NUM_CHUNK_PROC);
-        
-        return dm->curr_ticket[idx];
+        BUG_ON(idx >= NUM_CHUNK_PROC);        
+        return atomic64_read(&dm->curr_ticket[idx]);
 }
 
 static void inc_current_ticket(demux_t *dm, uint32_t thread_id) {
         uint32_t idx = thread_id-1;
         BUG_ON(idx >= NUM_CHUNK_PROC);
-        dm->curr_ticket[idx]++;
+        atomic64_inc(&dm->curr_ticket[idx]);
 }
 
 int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mutex *mutex) {
@@ -228,7 +227,11 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         return chunk;
 }
 
-
+/*
+ * This function is thread-safe.
+ * As an invariant, it should not call any sleeping
+ * functions, like mutex_lock.
+ */
 void demux_chunk_end(demux_t *dm, struct mutex *mutex, chunk_t *chunk) {
         demux_ent_t *ent;
         int ret;
