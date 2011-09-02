@@ -28,19 +28,27 @@ static void prepare_mrr_replay(struct task_struct *tsk) {
     rtcb_t *rtcb = tsk->rtcb;
     replay_sphere_t *sphere = rtcb->sphere;
 
+    my_magic_message_int("in prepare_mrr_replay", rtcb->thread_id);
     if (sphere_is_chunk_replaying(sphere) && sphere_has_first_execve(sphere)) {
 
         set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
         mrr_set_replay();
 
         // if we already have a chunk, set its chunk size in the processor
-        // otherwise, let the code that will call chunk_begin, set the 
-        // chunk size, as well
+        // otherwise, if there is no active instance chunk_begin, call it now
+        // and then set the chunk size in the processor. otherwise, let the
+        // caller of the currently active version of chunk_begin set the 
+        // target chunk size
+        if ((NULL == rtcb->chunk) && !rtcb->active_chunk_begin) {
+            sphere_chunk_begin(tsk);
+        }
         if (NULL != rtcb->chunk) {
             BUG_ON(0 == rtcb->chunk->inst_count);
             mrr_set_target_chunk_size(rtcb->chunk->inst_count);
         }
     }
+    my_magic_message_int("out of prepare_mrr_replay", rtcb->thread_id);
+
 }
 
 
@@ -150,7 +158,6 @@ void mrr_switch_from_replay(struct task_struct *tsk) {
             uint32_t cur_inst_count = mrr_get_chunk_size(1);
             my_magic_message_int("just read mrr chunk size", rtcb->thread_id);
             my_magic_message_int("read mrr chunk size is", cur_inst_count);
-            //my_sim_break();
 
             // update the remaining inst count
             BUG_ON(rtcb->chunk->inst_count < cur_inst_count);

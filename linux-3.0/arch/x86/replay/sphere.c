@@ -622,34 +622,46 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         chunk_t *chunk;
         uint32_t idx, i, me;
 
-        BUG_ON(rtcb->chunk != NULL);
-        printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
+        preempt_disable();
+        // FIXME fix this mess
+        if (!rtcb->active_chunk_begin && (rtcb->chunk == NULL)) {
+                rtcb->active_chunk_begin = 1;
+                preempt_enable();
 
-        chunk = demux_chunk_begin(sphere->demux, rtcb->thread_id, &sphere->mutex);
-        BUG_ON(chunk->thread_id != rtcb->thread_id);
-        
-        me = chunk->processor_id;
+                BUG_ON(rtcb->chunk != NULL);
+                printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
 
-        printk(KERN_CRIT "waiting for predecessor chunks to finish tid = %u\n", rtcb->thread_id);
-        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
-                printk(KERN_CRIT "proc %u: count = %u sema_count = %u\n",
-                       me, chunk->pred_vec[idx], sphere->proc_sem[idx][me].count);
-        }
+                chunk = demux_chunk_begin(sphere->demux, rtcb->thread_id, &sphere->mutex);
+                BUG_ON(chunk->thread_id != rtcb->thread_id);
+                
+                me = chunk->processor_id;
 
-        mutex_unlock(&sphere->mutex);
-
-        // now wait on tokens from predecessor chunks
-        my_magic_message_int("before semaphores", rtcb->thread_id);
-        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
-                for(i = 0; i < chunk->pred_vec[idx]; i++) {
-                        down(&(sphere->proc_sem[idx][me]));
+                printk(KERN_CRIT "waiting for predecessor chunks to finish tid = %u\n", rtcb->thread_id);
+                for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                        printk(KERN_CRIT "proc %u: count = %u sema_count = %u\n",
+                               me, chunk->pred_vec[idx], sphere->proc_sem[idx][me].count);
                 }
-        }
-        my_magic_message_int("after semaphores", rtcb->thread_id);
 
-        mutex_lock(&sphere->mutex);
-        rtcb->chunk = chunk;
-        printk(KERN_CRIT "chunk begin tid = %u ip = 0x%p\n", rtcb->thread_id, (void *) chunk->ip);
+                mutex_unlock(&sphere->mutex);
+
+                // now wait on tokens from predecessor chunks
+                my_magic_message_int("before semaphores", rtcb->thread_id);
+                for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                        for(i = 0; i < chunk->pred_vec[idx]; i++) {
+                                down(&(sphere->proc_sem[idx][me]));
+                        }
+                }
+                my_magic_message_int("after semaphores", rtcb->thread_id);
+
+                mutex_lock(&sphere->mutex);
+                rtcb->chunk = chunk;
+                printk(KERN_CRIT "chunk begin tid = %u ip = 0x%p\n", rtcb->thread_id, (void *) chunk->ip);
+                rtcb->active_chunk_begin = 0;
+        }
+        else {
+                preempt_enable();
+        }
+
 }
 
 
@@ -948,6 +960,10 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
                         current->rtcb->perf_count = perf_counter_read(current->rtcb->pevent);
                 #endif
                 } else if(current->rtcb->needs_chunk_start) {
+                #ifdef CONFIG_MRR
+                        // mrr_switch_to_replay() may sleep. don't call it here
+                        start_mrr = 1;
+                #endif
                         current->rtcb->needs_chunk_start = 0;
                         sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
