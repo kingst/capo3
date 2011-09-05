@@ -131,7 +131,6 @@ typedef struct replay_thread_control_block {
         struct chunk_struct *chunk;
         uint32_t my_ticket;
         int needs_chunk_start;
-        int active_chunk_begin;
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         uint64_t perf_count;
         struct perf_event *pevent;

@@ -4,6 +4,8 @@
 #include <asm/mrr/mrrhw_if.h>
 #include <asm/mrr/mrrhwsw_if.h>
 
+void mrr_virtualize_chunk_size(struct task_struct *tsk);
+
 void mrr_buffer_full_handler(struct task_struct *tsk, bool complete_flush);
 void mrr_chunk_done_handler(struct task_struct *tsk);
 

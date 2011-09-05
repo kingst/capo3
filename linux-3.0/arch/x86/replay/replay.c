@@ -367,7 +367,6 @@ static void rr_thread_create(struct task_struct *tsk, replay_sphere_t *sphere) {
         rtcb->send_sig = 0;
         rtcb->chunk = NULL;
         rtcb->needs_chunk_start = current != tsk;
-        rtcb->active_chunk_begin = 0;
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         rtcb->perf_count = 0;
         rtcb->pevent = NULL;
@@ -388,14 +387,14 @@ static void rr_thread_exit(struct pt_regs *regs) {
                 mrr_switch_from_record(current);
         } else if (sphere_is_chunk_replaying(rtcb->sphere)) {
                 mrr_switch_from_replay(current);
-                BUG_ON(current->rtcb->chunk != NULL);
+                BUG_ON((NULL != rtcb->chunk) && (0 != rtcb->chunk->inst_count));
         }
         clear_thread_flag(TIF_MRR_CHUNKING);
-#else
-        if(sphere_is_chunk_replaying(rtcb->sphere)) {
+#endif
+
+        if(sphere_is_chunk_replaying(rtcb->sphere) && (rtcb->chunk != NULL)) {
                 sphere_chunk_end(current);
         }
-#endif
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
