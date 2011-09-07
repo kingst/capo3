@@ -935,12 +935,6 @@ NORET_TYPE void do_exit(long code)
 
 	tracehook_report_exit(&code);
 
-#ifdef CONFIG_RECORD_REPLAY
-        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_thread_exit_cb)) {
-                rr_thread_exit_cb(task_pt_regs(tsk));
-        }
-#endif
-
 	validate_creds_for_do_exit(tsk);
 
 	/*
@@ -965,8 +959,8 @@ NORET_TYPE void do_exit(long code)
 	}
 
 	exit_irq_thread();
-
 	exit_signals(tsk);  /* sets PF_EXITING */
+
 	/*
 	 * tsk->flags are checked in the futex code to protect against
 	 * an exiting task cleaning up the robust pi futexes.
@@ -1000,6 +994,12 @@ NORET_TYPE void do_exit(long code)
 	taskstats_exit(tsk, group_dead);
 
 	exit_mm(tsk);
+
+#ifdef CONFIG_RECORD_REPLAY
+        if(test_thread_flag(TIF_RECORD_REPLAY) && (NULL != rr_thread_exit_cb)) {
+                rr_thread_exit_cb(task_pt_regs(tsk));
+        }
+#endif
 
 	if (group_dead)
 		acct_process();

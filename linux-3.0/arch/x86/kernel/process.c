@@ -151,6 +151,7 @@ void disable_TSC(void)
 		hard_disable_TSC();
 	preempt_enable();
 }
+EXPORT_SYMBOL_GPL(disable_TSC);
 
 static void hard_enable_TSC(void)
 {

@@ -60,6 +60,7 @@
 #include <linux/file.h>
 #include <linux/mman.h>
 #include <linux/syscalls.h>
+#include <linux/module.h>
 
 #include <linux/cond.h>
 
@@ -68,6 +69,7 @@ void cond_init(cond_t *cond) {
         cond->thread_count = 0;
         cond->wait_num = 0;
 }
+EXPORT_SYMBOL_GPL(cond_init);
 
 void cond_wait(cond_t *cond, struct mutex *mutex) {
         int ret;
@@ -83,15 +85,21 @@ void cond_wait(cond_t *cond, struct mutex *mutex) {
 
         mutex_lock(mutex);
 }
+EXPORT_SYMBOL_GPL(cond_wait);
+
 void cond_signal(cond_t *cond) {
         spin_lock(&cond->wait.lock);
         cond->wait_num++;
         wake_up_locked(&cond->wait);
         spin_unlock(&cond->wait.lock);
 }
+EXPORT_SYMBOL_GPL(cond_signal);
+
 void cond_broadcast(cond_t *cond) {
         spin_lock(&cond->wait.lock);
         cond->wait_num = cond->thread_count;
         wake_up_locked(&cond->wait);
         spin_unlock(&cond->wait.lock);
 }
+EXPORT_SYMBOL_GPL(cond_broadcast);
+

@@ -1356,6 +1356,7 @@ SYSCALL_DEFINE0(getpid)
 {
 	return task_tgid_vnr(current);
 }
+EXPORT_SYMBOL_GPL(sys_getpid);
 
 /*
  * Accessing ->real_parent is not SMP-safe, it could
