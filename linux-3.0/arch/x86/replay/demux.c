@@ -77,6 +77,7 @@
 #include <asm/replay.h>
 #include <asm/mrr/simics_if.h>
 
+#define PRINT_DEBUG 0
 #define DEMUX_BUF_SIZE (1024*4096)
 
 typedef struct demux_chunk_struct {
@@ -168,7 +169,7 @@ int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mu
                 while(kfifo_avail(&ent->fifo) < sizeof(demux_chunk_t))
                         cond_wait(&ent->fifo_full_cond, mutex);
                 
-                printk(KERN_CRIT "pushing chunk tid=%u, ticket=%llu\n", dchunk->chunk.thread_id, dchunk->ticket);
+                if (PRINT_DEBUG) printk(KERN_CRIT "pushing chunk tid=%u, ticket=%llu\n", dchunk->chunk.thread_id, dchunk->ticket);
                 
                 kfifo_in(&ent->fifo, dchunk, sizeof(demux_chunk_t));
                 if(kfifo_len(&ent->fifo) == sizeof(demux_chunk_t))
@@ -217,12 +218,9 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         // to be at the beginning of the dchunk
         BUG_ON(chunk != (chunk_t *) dchunk);
 
-        my_magic_message_int("waiting for the next chunk entry", thread_id);
         while(!has_chunk(dm, thread_id, dchunk)) {
-                my_magic_message_int("waiting for the next chunk entry", thread_id);
                 cond_wait(&dm->next_chunk_cond, mutex);
         }
-        my_magic_message_int("got the next chunk entry", thread_id);
 
         return chunk;
 }

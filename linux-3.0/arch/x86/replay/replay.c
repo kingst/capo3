@@ -218,7 +218,7 @@ static void rr_send_signal(int signo) {
         regs = task_pt_regs(current);
 
         if(sphere_is_recording(current->rtcb->sphere)) {
-                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
+                if (PRINT_DEBUG) printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
                 syscallno = regs_syscallno(regs);
                 set_regs_syscallno(regs, signo);
                 record_header(current->rtcb->sphere, signal_event, 
@@ -335,12 +335,12 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         mask = 1;
         mask <<= signr;
         if((current->rtcb->send_sig & mask) != 0) {
-                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
+                if (PRINT_DEBUG) printk(KERN_CRIT "do_signal sending signal %d\n", signr);
                 return signr;
         } else {
                 if(sphere_is_recording(current->rtcb->sphere))
                         current->rtcb->def_sig |= mask;
-                printk(KERN_CRIT "defer signal\n");
+                if (PRINT_DEBUG) printk(KERN_CRIT "defer signal\n");
                 return -1;
         }
 
@@ -381,8 +381,6 @@ static void rr_thread_exit(struct pt_regs *regs) {
         sanity_check(current);
 
 #ifdef CONFIG_MRR
-        my_magic_message_int("exiting from rthread", rtcb->thread_id);
-
         if (sphere_is_recording(rtcb->sphere)) {
                 mrr_switch_from_record(current);
         } else if (sphere_is_chunk_replaying(rtcb->sphere)) {
@@ -409,8 +407,6 @@ static void rr_switch_from(struct task_struct *prev_p) {
         if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
                 BUG_ON(current != prev_p);
                 sanity_check(prev_p);
-                my_magic_message_int("switching from rthread", prev_p->rtcb->thread_id);
-
                 if (sphere_is_recording(prev_p->rtcb->sphere)) {
                         mrr_switch_from_record(prev_p);
                 } else if (sphere_is_chunk_replaying(prev_p->rtcb->sphere)) {
@@ -442,8 +438,6 @@ static void rr_switch_to(struct task_struct *next_p) {
         if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
                 BUG_ON(current != next_p);
                 sanity_check(next_p);
-                my_magic_message_int("switching to rthread", next_p->rtcb->thread_id);
-
                 if (sphere_is_recording(next_p->rtcb->sphere)) {
                         mrr_switch_to_record(next_p);
                 } else if (sphere_is_chunk_replaying(next_p->rtcb->sphere)) {
@@ -700,7 +694,7 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 sphere_reset(sphere);
         } else if(cmd == REPLAY_IOC_START_CHUNKING) {
-                printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
+                if (PRINT_DEBUG) printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
                 ret = sphere_start_replaying(sphere);
                 ret = sphere_start_chunking(sphere);
                 rr_thread_create(current, sphere);

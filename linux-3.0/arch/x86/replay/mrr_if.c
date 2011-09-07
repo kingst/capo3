@@ -15,8 +15,6 @@ void mrr_virtualize_chunk_size(struct task_struct *tsk) {
     // save the remaining inst count
     if (sphere_is_chunk_replaying(rtcb->sphere) && test_tsk_thread_flag(tsk, TIF_MRR_CHUNKING) && (rtcb->chunk != NULL)) {
         uint32_t cur_inst_count = mrr_get_chunk_size(1);
-        my_magic_message_int("just read mrr chunk size", rtcb->thread_id);
-        my_magic_message_int("read mrr chunk size is", cur_inst_count);
 
         // update the remaining inst count
         BUG_ON(rtcb->chunk->inst_count < cur_inst_count);
@@ -55,7 +53,6 @@ static void prepare_mrr_replay(struct task_struct *tsk) {
 
         // if we already have a chunk, set its chunk size in the processor.
         if (NULL != rtcb->chunk) {
-            my_magic_message_int("prepare_mrr_replay(): setting mrr chunk size", rtcb->chunk->inst_count);
             mrr_set_target_chunk_size(rtcb->chunk->inst_count);
         }
     }
@@ -111,13 +108,8 @@ void mrr_chunk_done_handler(struct task_struct *tsk) {
         // reset the mrr chunk inst count
         mrr_get_chunk_size(1);
 
-        // for debugging: print a message and break
-        my_magic_message("in chunk done handler.");
-        //my_sim_break();
-
         // signal the end of the current chunk
         if (NULL != rtcb->chunk) {
-            my_magic_message("calling sphere_chunk_end");
             sphere_chunk_end(current);
         }
 
@@ -125,12 +117,9 @@ void mrr_chunk_done_handler(struct task_struct *tsk) {
 		local_irq_enable();
 
         // set the next target chunk size
-        my_magic_message("calling sphere_chunk_begin");        
         sphere_chunk_begin(current);
         BUG_ON(NULL == rtcb->chunk);
-
         BUG_ON(0 == rtcb->chunk->inst_count);
-        my_magic_message_int("mrr_chunk_done_handler(): setting mrr chunk size", rtcb->chunk->inst_count);
         mrr_set_target_chunk_size(rtcb->chunk->inst_count);
     }
 }
