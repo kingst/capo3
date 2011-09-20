@@ -84,7 +84,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
 static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
                                 uint32_t thread_id, struct pt_regs *regs);
 static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb);
-
+static void sphere_chunk_end_locked(struct task_struct *tsk);
 
 /********************************* Helpers for usermode ***************************************/
 
@@ -223,6 +223,17 @@ static uint32_t sphere_next_thread_id(replay_sphere_t *sphere) {
 
 /********************************** Helpers for recording *************************************/
 
+#ifdef CONFIG_MRR
+static int cut_chunk_on_syscall(struct pt_regs *regs) {
+        switch(regs_syscallno(regs)) {
+        case __NR_futex:
+                return 1;
+        }
+
+        return 0;
+}
+#endif
+
 static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
                                 uint32_t thread_id, struct pt_regs *regs) {
         int ret;
@@ -278,6 +289,7 @@ static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
 
 static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         int len, ret;
+        int result = 0;
 
         // if someone is in the middle of processing a copy to
         // user buffer, just exit immediately because the data on the fifo
@@ -297,16 +309,34 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
                 }
         }
 
-        if(sphere->header != NULL)
-                return sphere->header->thread_id == thread_id;
+        if(sphere->header != NULL) {
+                my_magic_message_int("next log entry is tid", sphere->header->thread_id);
+                my_magic_message_int("next log entry is type", sphere->header->type);
+                result = sphere->header->thread_id == thread_id;
+        }
 
-        return 0;
+        // for test
+        len = kfifo_len(&sphere->fifo);
+        if(len >= sizeof(replay_header_t)) {
+            replay_header_t *temp = kmalloc(sizeof(replay_header_t), GFP_KERNEL);
+            memset(temp, 0, sizeof(replay_header_t));
+            ret = kfifo_out_peek(&sphere->fifo, temp, sizeof(replay_header_t));
+            if(ret != sizeof(replay_header_t)) BUG();
+            my_magic_message_int("next-to-next log entry is tid", temp->thread_id);
+            my_magic_message_int("next-to-next log entry is type", temp->type);
+            kfree(temp);
+        } else {
+            my_magic_message("not enough data in kfifo");
+        }
+                
+        return result;
 }
 
 static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t thread_id) {
         replay_header_t *header;
 
         while(!is_next_log(sphere, thread_id)) {
+                my_magic_message_int("sleeping for next log entry", thread_id);
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
         }
 
@@ -404,6 +434,8 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
 
         case __NR_clone: case __NR_fork:
+
+        //case __NR_futex:
 
         case __NR_rt_sigaction: case __NR_rt_sigprocmask: case __NR_rt_sigreturn:
         case __NR_sigaltstack:
@@ -571,11 +603,18 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 if ((NULL != sphere) && sphere_is_chunk_replaying(sphere) && (NULL != current->rtcb) && (NULL != current->rtcb->chunk)) {
                         mrr_virtualize_chunk_size(current);
                         if (0 == current->rtcb->chunk->inst_count)
-                            sphere_chunk_end(current);
+                            sphere_chunk_end_locked(current);
                 }
         #endif
 
+                my_magic_message_int("waiting for next log entry", thread_id);
+                my_magic_message_int("log entry type is", event);
+                if ((NULL != current->rtcb) && (NULL != current->rtcb->chunk))
+                    my_magic_message_int("remaining inst_count is", current->rtcb->chunk->inst_count);
                 header = replay_wait_for_log(sphere, thread_id);
+                my_magic_message_int("got the next log entry", thread_id);
+                my_magic_message_int("entry type is", header->type);
+
                 if(header == NULL)
                         BUG();
                 
@@ -616,6 +655,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 kfree(header);
                 header = NULL;
 
+                my_magic_message_int("signaling next_record_cond", thread_id);
                 cond_broadcast(&sphere->next_record_cond);
 
         } while(!exit_loop);
@@ -651,18 +691,40 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         mutex_unlock(&sphere->mutex);
 
+        my_magic_message_int("before semaphores", rtcb->thread_id);
         // now wait on tokens from predecessor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
                 for(i = 0; i < chunk->pred_vec[idx]; i++) {
                         down(&(sphere->proc_sem[idx][me]));
                 }
         }
+        my_magic_message_int("after semaphores", rtcb->thread_id);
 
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
         if (PRINT_DEBUG) printk(KERN_CRIT "chunk begin tid = %u ip = 0x%p\n", rtcb->thread_id, (void *) chunk->ip);
 }
 
+
+static void sphere_chunk_end_locked(struct task_struct *tsk) {
+        uint32_t idx, i, me;
+        rtcb_t *rtcb = tsk->rtcb;
+        replay_sphere_t *sphere = rtcb->sphere;
+        chunk_t *chunk = rtcb->chunk;
+
+        me = chunk->processor_id;
+        demux_chunk_end(sphere->demux, &sphere->mutex, chunk);        
+
+        // signal the successor chunks
+        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
+                for(i = 0; i < chunk->succ_vec[idx]; i++) {
+                        up(&(sphere->proc_sem[me][idx]));
+                }
+        }
+
+        rtcb->chunk = NULL;
+        kfree(chunk);
+}
 
 /**********************************************************************************************/
 
@@ -898,6 +960,13 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
         if(sphere->replay_first_execve == 1) {
                 sphere->replay_first_execve = 2;
                 mrr_switch_to_record(current);
+        } else if(current->rtcb->needs_chunk_start) {
+                current->rtcb->needs_chunk_start = 0;
+                mrr_switch_to_record(current);
+        } else if (syscall_enter_event == event) {
+                // cut the chunk on all recorded events
+                // to prohibit deadlocks between chunks log and input log
+                mrr_terminate_chunk();
         }
 #endif
         mutex_unlock(&sphere->mutex);
@@ -932,10 +1001,6 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
 void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                   struct pt_regs *regs) {
 
-#ifdef CONFIG_MRR
-        int start_mrr = 0;
-#endif
-
         BUG_ON(sphere != current->rtcb->sphere);
 
         mutex_lock(&sphere->mutex);
@@ -945,38 +1010,30 @@ void replay_event(replay_sphere_t *sphere, replay_event_t event, uint32_t thread
         // thread that executes execve, gets chunking started        
         if(sphere_is_chunk_replaying(sphere)) {
                 if(sphere->replay_first_execve == 1) {
-                #ifdef CONFIG_MRR
-                        // mrr_switch_to_replay() may sleep. don't call it here
-                        start_mrr = 1;
-                #endif
                         sphere->replay_first_execve = 2;
-                        sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                        sphere_chunk_begin_locked(sphere, current->rtcb);
                         sphere_set_breakpoint(current->rtcb->chunk->ip);
                         current->rtcb->pevent = perf_counter_init(current);
                         current->rtcb->perf_count = perf_counter_read(current->rtcb->pevent);
                 #endif
-                } else if(current->rtcb->needs_chunk_start) {
                 #ifdef CONFIG_MRR
-                        // mrr_switch_to_replay() may sleep. don't call it here
-                        start_mrr = 1;
+                        mrr_switch_to_replay(current);
                 #endif
+                } else if(current->rtcb->needs_chunk_start) {
                         current->rtcb->needs_chunk_start = 0;
-                        sphere_chunk_begin_locked(sphere, current->rtcb);
                 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
+                        sphere_chunk_begin_locked(sphere, current->rtcb);
                         current->rtcb->pevent = perf_counter_init(current);
                         sphere_set_breakpoint(current->rtcb->chunk->ip);
+                #endif
+                #ifdef CONFIG_MRR
+                        mrr_switch_to_replay(current);
                 #endif
                 }
         }
 
         mutex_unlock(&sphere->mutex);
-
-#ifdef CONFIG_MRR
-        if (start_mrr) {
-                mrr_switch_to_replay(current);
-        }
-#endif
 }
 
 void sphere_chunk_begin(struct task_struct *tsk) {
@@ -986,29 +1043,11 @@ void sphere_chunk_begin(struct task_struct *tsk) {
         mutex_unlock(&sphere->mutex);
 }
 
-/*
- * This function is thread-safe.
- * As an invariant, it should not call any sleeping
- * functions, like mutex_lock.
- */
 void sphere_chunk_end(struct task_struct *tsk) {
-        uint32_t idx, i, me;
-        rtcb_t *rtcb = tsk->rtcb;
-        replay_sphere_t *sphere = rtcb->sphere;
-        chunk_t *chunk = rtcb->chunk;
-
-        me = chunk->processor_id;
-        demux_chunk_end(sphere->demux, &sphere->mutex, chunk);        
-
-        // signal the successor chunks
-        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
-                for(i = 0; i < chunk->succ_vec[idx]; i++) {
-                        up(&(sphere->proc_sem[me][idx]));
-                }
-        }
-
-        rtcb->chunk = NULL;
-        kfree(chunk);
+        replay_sphere_t *sphere = tsk->rtcb->sphere;
+        mutex_lock(&sphere->mutex);
+        sphere_chunk_end_locked(tsk);
+        mutex_unlock(&sphere->mutex);
 }
 
 void sphere_check_first_execve(replay_sphere_t *sphere, struct pt_regs *regs) {

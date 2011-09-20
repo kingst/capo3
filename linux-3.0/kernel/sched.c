@@ -4323,17 +4323,17 @@ need_resched:
 	clear_tsk_need_resched(prev);
 	rq->skip_clock_update = 0;
 
+#ifdef CONFIG_RECORD_REPLAY
+    BUG_ON(current != prev);
+    if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_from_cb)) {
+        rr_switch_from_cb(current);
+    }
+#endif
+
 	if (likely(prev != next)) {
 		rq->nr_switches++;
 		rq->curr = next;
 		++*switch_count;
-
-#ifdef CONFIG_RECORD_REPLAY
-        BUG_ON(current != prev);
-        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_from_cb)) {
-            rr_switch_from_cb(current);
-        }
-#endif
 
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
@@ -4344,6 +4344,7 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
+
 	} else
 		raw_spin_unlock_irq(&rq->lock);
 
@@ -4354,10 +4355,11 @@ need_resched:
 		goto need_resched;
 
 #ifdef CONFIG_RECORD_REPLAY
-        if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_to_cb)) {
-            rr_switch_to_cb(current);
-        }
+    if (test_tsk_thread_flag(current, TIF_RECORD_REPLAY) && (NULL != rr_switch_to_cb)) {
+        rr_switch_to_cb(current);
+    }
 #endif
+
 }
 EXPORT_SYMBOL(schedule);
 

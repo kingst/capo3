@@ -119,7 +119,11 @@ void demux_free(demux_t *dm) {
 static uint64_t alloc_next_ticket(demux_t *dm, uint32_t thread_id) {
         uint64_t ticket;
         uint32_t idx = thread_id-1;
-        BUG_ON(idx >= NUM_CHUNK_PROC);
+
+        if (idx >= NUM_CHUNK_PROC) {
+            my_magic_message_int("Bad idx is ", idx); 
+            BUG_ON(idx >= NUM_CHUNK_PROC);
+        }
 
         ticket = dm->next_ticket[idx];
         dm->next_ticket[idx]++;
@@ -188,6 +192,8 @@ static int has_chunk(demux_t *dm, uint32_t thread_id, demux_chunk_t *dchunk) {
         uint64_t curr_ticket;
 
         curr_ticket = get_current_ticket(dm, thread_id);
+        my_magic_message_int("in has_chunk", thread_id);
+        my_magic_message_int("cur_ticket is", curr_ticket);
         for(proc_id = 0; proc_id < NUM_CHUNK_PROC; proc_id++) {
                 ent = dm->entries + proc_id;
 
@@ -218,17 +224,18 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         // to be at the beginning of the dchunk
         BUG_ON(chunk != (chunk_t *) dchunk);
 
+        my_magic_message_int("waiting for next chunk entry", thread_id);
         while(!has_chunk(dm, thread_id, dchunk)) {
                 cond_wait(&dm->next_chunk_cond, mutex);
         }
+        my_magic_message_int("got the next chunk entry", thread_id);
+        my_magic_message_int("chunk size is", chunk->inst_count);
 
         return chunk;
 }
 
 /*
- * This function is thread-safe.
- * As an invariant, it should not call any sleeping
- * functions, like mutex_lock.
+ * This function should be called while holding the sphere mutex
  */
 void demux_chunk_end(demux_t *dm, struct mutex *mutex, chunk_t *chunk) {
         demux_ent_t *ent;

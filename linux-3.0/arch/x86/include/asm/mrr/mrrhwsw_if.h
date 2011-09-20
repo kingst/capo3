@@ -10,10 +10,8 @@
 #define mrr_disable_chunking()  asm volatile ( __MRR_INST_DISABLE_CHUNKING )
 #define mrr_enable_chunking()   asm volatile ( __MRR_INST_ENABLE_CHUNKING )
 #define mrr_terminate_chunk()   asm volatile ( __MRR_INST_TERMINATE_CHUNK )
-#define mrr_set_record()        asm volatile ( __MRR_INST_RECORD )
-#define mrr_set_replay()        asm volatile ( __MRR_INST_REPLAY )
 
-static inline int mrr_flush_buffer(void *paddr, int actor_id) {
+static inline int mrr_flush_buffer(void *paddr, unsigned int actor_id) {
 
     int ret;
 
@@ -26,7 +24,7 @@ static inline int mrr_flush_buffer(void *paddr, int actor_id) {
     return ret;
 }
 
-static inline int mrr_flush(void *paddr, int actor_id) {
+static inline int mrr_flush(void *paddr, unsigned int actor_id) {
 
     int ret;
 
@@ -39,7 +37,7 @@ static inline int mrr_flush(void *paddr, int actor_id) {
     return ret;
 }
 
-static inline void mrr_set_target_chunk_size(int size) {
+static inline void mrr_set_target_chunk_size(unsigned int size) {
     asm volatile (
         __MRR_INST_SET_CHUNK_SIZE
         : // no output
@@ -47,17 +45,32 @@ static inline void mrr_set_target_chunk_size(int size) {
     );
 }
 
-static inline int mrr_get_chunk_size(int reset) {
+static inline int mrr_get_chunk_size(void) {
 
     int ret;
 
     asm volatile (
         __MRR_INST_GET_CHUNK_SIZE
         : "=a" (ret)
-        : "a" (reset)
     );
 
     return ret;
+}
+
+static inline void mrr_set_record(unsigned int actor_id) {
+    asm volatile (
+        __MRR_INST_RECORD
+        : // no output
+        : "a" (actor_id)
+    );
+}
+
+static inline void mrr_set_replay(unsigned int actor_id) {
+    asm volatile (
+        __MRR_INST_REPLAY
+        : // no output
+        : "a" (actor_id)
+    );
 }
 
 /**
@@ -74,12 +87,12 @@ void set_mrr_chunk_done_handler_cb(mrr_chunk_done_handler_sig cb);
 #define mrr_disable_chunking()          ((void) 0)
 #define mrr_enable_chunking()           ((void) 0)
 #define mrr_terminate_chunk()           ((void) 0)
-#define mrr_set_record()                ((void) 0)
-#define mrr_set_replay()                ((void) 0)
+#define mrr_set_record(nthg)            ((void) 0)
+#define mrr_set_replay(nthg)            ((void) 0)
 #define mrr_flush_buffer(nthg,nthg1)    ((void) 0)
 #define mrr_flush(nthg,nthg1)           ((void) 0)
 #define mrr_set_target_chunk_size(nthg) ((void) 0)
-#define mrr_get_chunk_size(nthg)        ((void) 0)
+#define mrr_get_chunk_size()            ((void) 0)
 
 #endif // CONFIG_MRR
 

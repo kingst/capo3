@@ -58,6 +58,7 @@ extern "C" {
 
 using namespace std;
 
+
 int main(int argc, char *argv[]) {
         chunk_t *chunk;
         int idx;
@@ -94,10 +95,6 @@ int main(int argc, char *argv[]) {
 
                 fprintf(stderr,"ip           = 0x%p\n", (void *) chunk->ip);
 
-                /*
-
-                */
-
                 chunk_list.insert(chunk_list.end(), chunk);
                 chunk = new chunk_t;
         }
@@ -109,8 +106,8 @@ int main(int argc, char *argv[]) {
         for(list_iter = chunk_list.begin(); list_iter != chunk_list.end(); list_iter++) {
                 chunk = *list_iter;
                 if(last_chunk.find(chunk->thread_id) != last_chunk.end()) {
-                        assert(chunk->ip != 0);
-                        assert(chunk->inst_count != 0);
+                        //assert(chunk->ip != 0);
+                        //assert(chunk->inst_count != 0);
                         assert(last_chunk[chunk->thread_id]->ip == 0);
                         assert(last_chunk[chunk->thread_id]->inst_count == 0);
                                 

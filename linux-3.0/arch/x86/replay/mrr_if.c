@@ -14,14 +14,10 @@ void mrr_virtualize_chunk_size(struct task_struct *tsk) {
 
     // save the remaining inst count
     if (sphere_is_chunk_replaying(rtcb->sphere) && test_tsk_thread_flag(tsk, TIF_MRR_CHUNKING) && (rtcb->chunk != NULL)) {
-        uint32_t cur_inst_count = mrr_get_chunk_size(1);
-
         // update the remaining inst count
-        BUG_ON(rtcb->chunk->inst_count < cur_inst_count);
-        rtcb->chunk->inst_count -= cur_inst_count;
-
-        // set the new target size in the processor
-        mrr_set_target_chunk_size(rtcb->chunk->inst_count);            
+        uint32_t cur_inst_count = mrr_get_chunk_size();
+        BUG_ON(cur_inst_count > rtcb->chunk->inst_count);
+        rtcb->chunk->inst_count = cur_inst_count;
     }
 }
 
@@ -37,7 +33,7 @@ static void prepare_mrr_record(struct task_struct *tsk) {
     // FIXME: add sphere_is_chunk_recording()
     if (sphere_is_recording(sphere) /*sphere_is_chunk_recording(sphere)*/ && sphere_has_first_execve(sphere)) {
         set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
-        mrr_set_record();
+        mrr_set_record(tsk->rtcb->thread_id);
     }
 }
 
@@ -49,11 +45,15 @@ static void prepare_mrr_replay(struct task_struct *tsk) {
     if (sphere_is_chunk_replaying(sphere) && sphere_has_first_execve(sphere)) {
 
         set_ti_thread_flag(task_thread_info(tsk), TIF_MRR_CHUNKING);
-        mrr_set_replay();
+        mrr_set_replay(tsk->rtcb->thread_id);
 
-        // if we already have a chunk, set its chunk size in the processor.
+        // if we already have a chunk, update and set its 
+        // chunk size in the processor.
         if (NULL != rtcb->chunk) {
             mrr_set_target_chunk_size(rtcb->chunk->inst_count);
+        }
+        else {
+            mrr_set_target_chunk_size(0);
         }
     }
 }
@@ -87,7 +87,6 @@ void mrr_buffer_full_handler(struct task_struct *tsk, bool complete_flush) {
         // copy the rtcb buffer into the rscb buffer
         // ...        
     }
-    
 }
 
 
@@ -105,21 +104,21 @@ void mrr_chunk_done_handler(struct task_struct *tsk) {
     // this should be during replay
     if (sphere_is_replaying(tsk->rtcb->sphere)) {
 
-        // reset the mrr chunk inst count
-        mrr_get_chunk_size(1);
+        // sanity check
+        uint32_t cur_inst_count = mrr_get_chunk_size();
+        BUG_ON(cur_inst_count != 0);
+
+        // we might sleep, so enable irqs
+		local_irq_enable();
 
         // signal the end of the current chunk
         if (NULL != rtcb->chunk) {
             sphere_chunk_end(current);
         }
 
-        // we might sleep, so enable irqs
-		local_irq_enable();
-
         // set the next target chunk size
         sphere_chunk_begin(current);
         BUG_ON(NULL == rtcb->chunk);
-        BUG_ON(0 == rtcb->chunk->inst_count);
         mrr_set_target_chunk_size(rtcb->chunk->inst_count);
     }
 }
@@ -147,10 +146,9 @@ void mrr_switch_from_record(struct task_struct *tsk) {
  * This function does not sleep.
  */
 void mrr_switch_from_replay(struct task_struct *tsk) {
-
+    my_magic_message_int("switching from rthread", tsk->rtcb->thread_id);
     // save the remaining inst count
     mrr_virtualize_chunk_size(tsk);
-
     my_magic_app_out();
 }
 
@@ -170,6 +168,7 @@ void mrr_switch_to_record(struct task_struct *tsk) {
  * this function may sleep.
  */
 void mrr_switch_to_replay(struct task_struct *tsk) {
+    my_magic_message_int("switching to rthread", tsk->rtcb->thread_id);
     my_magic_app_in();
     prepare_mrr_replay(tsk);
 }

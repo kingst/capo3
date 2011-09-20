@@ -84,7 +84,7 @@ int main(int argc, char *argv[]) {
                 } else if(header.type == thread_exit_event) {
                         printf("thread_exit_event\n");
                 } else if(header.type == instruction_event) {
-                        printf("instruction_event\n");
+                        printf("instruction_event ip = 0x%08lx\n", header.regs.rip);
                 } else if(header.type == execve_event) {
                         printf("execve_event\n");
                         e = readExecveData();
