@@ -75,11 +75,12 @@ void cond_wait(cond_t *cond, struct mutex *mutex) {
         int ret;
         uint64_t id;
 
-        mutex_unlock(mutex);        
-
         spin_lock(&cond->wait.lock);
         cond->thread_count++;
         id = cond->thread_count;
+
+        mutex_unlock(mutex);
+
         ret = wait_event_interruptible_locked(cond->wait, id <= cond->wait_num);
         spin_unlock(&cond->wait.lock);
 

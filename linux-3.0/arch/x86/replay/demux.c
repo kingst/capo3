@@ -76,6 +76,7 @@
 
 #include <asm/replay.h>
 
+#define PRINT_DEBUG 0
 #define DEMUX_BUF_SIZE (1024*4096)
 
 typedef struct demux_chunk_struct {
@@ -167,7 +168,7 @@ int demux_from_user(demux_t *dm, const char __user *buf, size_t count, struct mu
                 while(kfifo_avail(&ent->fifo) < sizeof(demux_chunk_t))
                         cond_wait(&ent->fifo_full_cond, mutex);
                 
-                printk(KERN_CRIT "pushing chunk tid=%u, ticket=%llu\n", dchunk->chunk.thread_id, dchunk->ticket);
+                if (PRINT_DEBUG) printk(KERN_CRIT "pushing chunk tid=%u, ticket=%llu\n", dchunk->chunk.thread_id, dchunk->ticket);
                 
                 kfifo_in(&ent->fifo, dchunk, sizeof(demux_chunk_t));
                 if(kfifo_len(&ent->fifo) == sizeof(demux_chunk_t))
@@ -216,16 +217,15 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         // to be at the beginning of the dchunk
         BUG_ON(chunk != (chunk_t *) dchunk);
 
-        while(!has_chunk(dm, thread_id, dchunk))
+        while(!has_chunk(dm, thread_id, dchunk)) {
                 cond_wait(&dm->next_chunk_cond, mutex);
+        }
 
         return chunk;
 }
 
 /*
- * This function is thread-safe.
- * As an invariant, it should not call any sleeping
- * functions, like mutex_lock.
+ * This function should be called while holding the sphere mutex
  */
 void demux_chunk_end(demux_t *dm, struct mutex *mutex, chunk_t *chunk) {
         demux_ent_t *ent;

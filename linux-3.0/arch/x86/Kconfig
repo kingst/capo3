@@ -333,6 +333,13 @@ config RECORD_REPLAY
        ---help---
          Support for deterministic recording and replay.
 
+config RECORD_REPLAY_STATIC
+       bool "Should RR module be linked in statically?"
+       default y
+       depends on RECORD_REPLAY
+       ---help---
+         Should RR module be linked in statically?
+
 config RR_CHUNKING_PERFCOUNT
        bool "Support for chunk replay using performance counters"
        default n

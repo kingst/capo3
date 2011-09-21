@@ -127,6 +127,7 @@ struct thread_info {
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
 
 #ifdef CONFIG_RECORD_REPLAY
+
 /* work to do in syscall_trace_enter() */
 #define _TIF_WORK_SYSCALL_ENTRY	\
 	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_EMU | _TIF_SYSCALL_AUDIT |	\
@@ -136,7 +137,14 @@ struct thread_info {
 #define _TIF_WORK_SYSCALL_EXIT	\
 	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | _TIF_SINGLESTEP |	\
 	 _TIF_SYSCALL_TRACEPOINT | _TIF_RECORD_REPLAY)
-#else
+
+/* work to do on interrupt/exception return */
+#define _TIF_WORK_MASK							\
+	(0x0000FFFF &							\
+	 ~(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT|			\
+	   _TIF_SINGLESTEP|_TIF_SECCOMP|_TIF_SYSCALL_EMU|_TIF_RECORD_REPLAY))
+
+#else /* CONFIG_RECORD_REPLAY */
 
 /* work to do in syscall_trace_enter() */
 #define _TIF_WORK_SYSCALL_ENTRY	\
@@ -148,13 +156,14 @@ struct thread_info {
 	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | _TIF_SINGLESTEP |	\
 	 _TIF_SYSCALL_TRACEPOINT)
 
-#endif
-
 /* work to do on interrupt/exception return */
 #define _TIF_WORK_MASK							\
 	(0x0000FFFF &							\
 	 ~(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT|			\
-	   _TIF_SINGLESTEP|_TIF_SECCOMP|_TIF_SYSCALL_EMU|_TIF_RECORD_REPLAY))
+	   _TIF_SINGLESTEP|_TIF_SECCOMP|_TIF_SYSCALL_EMU))
+
+#endif /* CONFIG_RECORD_REPLAY */
+
 
 /* work to do on any return to user space */
 #define _TIF_ALLWORK_MASK						\

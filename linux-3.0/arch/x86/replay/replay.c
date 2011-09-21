@@ -67,6 +67,9 @@
 #include <asm/capo_perfct.h>
 
 #define NUM_REPLAY_MINOR 4
+#define REPLAY_VERSION	"0.3"
+
+#define PRINT_DEBUG 0
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
@@ -77,8 +80,6 @@ typedef struct sphere_file_data {
         replay_sphere_t *sphere;
         int is_chunk_log_fd;
 } sphere_fd_t;
-
-#define REPLAY_VERSION	"0.3"
 
 
 /*********************************** Callbacks from kernel ************************************/
@@ -118,10 +119,10 @@ static int check_for_end_of_chunk(rtcb_t *rtcb) {
         
         if((inst_count+15) >= rtcb->chunk->inst_count) {
                 if(inst_count > rtcb->chunk->inst_count) {
-                        printk(KERN_CRIT "went past by %u inst for %u chunk\n",
+                        if (PRINT_DEBUG) printk(KERN_CRIT "went past by %u inst for %u chunk\n",
                                inst_count - rtcb->chunk->inst_count, rtcb->chunk->inst_count);
                 } else if(inst_count < rtcb->chunk->inst_count) {
-                        printk(KERN_CRIT "stil had %u inst to go\n",
+                        if (PRINT_DEBUG) printk(KERN_CRIT "stil had %u inst to go\n",
                                rtcb->chunk->inst_count - inst_count);
                 }
                 
@@ -214,7 +215,7 @@ static void rr_send_signal(int signo) {
         regs = task_pt_regs(current);
 
         if(sphere_is_recording(current->rtcb->sphere)) {
-                printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
+                if (PRINT_DEBUG) printk(KERN_CRIT "sending signal, orig ax = %ld\n", regs_syscallno(regs));
                 syscallno = regs_syscallno(regs);
                 set_regs_syscallno(regs, signo);
                 record_header(current->rtcb->sphere, signal_event, 
@@ -322,19 +323,20 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
         }
 
         // check if this is an async signal
-        if(!async)
+        if(!async) {
                 return signr;
+        }
 
         BUG_ON(signr >= SIGRTMAX);        
         mask = 1;
         mask <<= signr;
         if((current->rtcb->send_sig & mask) != 0) {
-                printk(KERN_CRIT "do_signal sending signal %d\n", signr);
+                if (PRINT_DEBUG) printk(KERN_CRIT "do_signal sending signal %d\n", signr);
                 return signr;
         } else {
                 if(sphere_is_recording(current->rtcb->sphere))
                         current->rtcb->def_sig |= mask;
-                printk(KERN_CRIT "defer signal\n");
+                if (PRINT_DEBUG) printk(KERN_CRIT "defer signal\n");
                 return -1;
         }
 
@@ -374,15 +376,13 @@ static void rr_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
         sanity_check(current);
 
-        if(sphere_is_chunk_replaying(rtcb->sphere)) {
+        if(sphere_is_chunk_replaying(rtcb->sphere) && (rtcb->chunk != NULL)) {
                 sphere_chunk_end(current);
         }
 
         current->rtcb = NULL;
         clear_thread_flag(TIF_RECORD_REPLAY);
         sphere_thread_exit(rtcb, regs);
-
-        //BUG_ON(rtcb->chunk != NULL);
 
         kfree(rtcb);
 }
@@ -465,7 +465,6 @@ static void rr_copy_to_user(unsigned long to_addr, void *buf, int len) {
                 //BUG();
         }
 }
-EXPORT_SYMBOL_GPL(rr_copy_to_user);
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 
@@ -655,7 +654,7 @@ static long replay_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         } else if(cmd == REPLAY_IOC_RESET_SPHERE) {
                 sphere_reset(sphere);
         } else if(cmd == REPLAY_IOC_START_CHUNKING) {
-                printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
+                if (PRINT_DEBUG) printk(KERN_CRIT "ioctl start chunking %ld\n", sys_getpid());
                 ret = sphere_start_replaying(sphere);
                 ret = sphere_start_chunking(sphere);
                 rr_thread_create(current, sphere);
@@ -777,7 +776,7 @@ module_exit(replay_exit);
 
 MODULE_AUTHOR("Sam King");
 MODULE_DESCRIPTION("Provides control of replay hardware.");
-MODULE_LICENSE("BSD");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(REPLAY_VERSION);
 
 /**********************************************************************************************/
