@@ -75,7 +75,6 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
-#include <asm/mrr/simics_if.h>
 
 #define PRINT_DEBUG 0
 #define DEMUX_BUF_SIZE (1024*4096)
@@ -119,11 +118,7 @@ void demux_free(demux_t *dm) {
 static uint64_t alloc_next_ticket(demux_t *dm, uint32_t thread_id) {
         uint64_t ticket;
         uint32_t idx = thread_id-1;
-
-        if (idx >= NUM_CHUNK_PROC) {
-            my_magic_message_int("Bad idx is ", idx); 
-            BUG_ON(idx >= NUM_CHUNK_PROC);
-        }
+        BUG_ON(idx >= NUM_CHUNK_PROC);
 
         ticket = dm->next_ticket[idx];
         dm->next_ticket[idx]++;
@@ -192,8 +187,6 @@ static int has_chunk(demux_t *dm, uint32_t thread_id, demux_chunk_t *dchunk) {
         uint64_t curr_ticket;
 
         curr_ticket = get_current_ticket(dm, thread_id);
-        my_magic_message_int("in has_chunk", thread_id);
-        my_magic_message_int("cur_ticket is", curr_ticket);
         for(proc_id = 0; proc_id < NUM_CHUNK_PROC; proc_id++) {
                 ent = dm->entries + proc_id;
 
@@ -224,12 +217,9 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         // to be at the beginning of the dchunk
         BUG_ON(chunk != (chunk_t *) dchunk);
 
-        my_magic_message_int("waiting for next chunk entry", thread_id);
         while(!has_chunk(dm, thread_id, dchunk)) {
                 cond_wait(&dm->next_chunk_cond, mutex);
         }
-        my_magic_message_int("got the next chunk entry", thread_id);
-        my_magic_message_int("chunk size is", chunk->inst_count);
 
         return chunk;
 }

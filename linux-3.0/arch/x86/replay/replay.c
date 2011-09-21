@@ -71,6 +71,9 @@
 #endif
 
 #define NUM_REPLAY_MINOR 4
+#define REPLAY_VERSION	"0.3"
+
+#define PRINT_DEBUG 0
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
@@ -82,8 +85,6 @@ typedef struct sphere_file_data {
         int is_chunk_log_fd;
 } sphere_fd_t;
 
-#define REPLAY_VERSION	"0.3"
-#define PRINT_DEBUG 0
 
 /*********************************** Callbacks from kernel ************************************/
 static void sanity_check(struct task_struct *tsk) {
@@ -122,10 +123,10 @@ static int check_for_end_of_chunk(rtcb_t *rtcb) {
         
         if((inst_count+15) >= rtcb->chunk->inst_count) {
                 if(inst_count > rtcb->chunk->inst_count) {
-                        printk(KERN_CRIT "went past by %u inst for %u chunk\n",
+                        if (PRINT_DEBUG) printk(KERN_CRIT "went past by %u inst for %u chunk\n",
                                inst_count - rtcb->chunk->inst_count, rtcb->chunk->inst_count);
                 } else if(inst_count < rtcb->chunk->inst_count) {
-                        printk(KERN_CRIT "stil had %u inst to go\n",
+                        if (PRINT_DEBUG) printk(KERN_CRIT "stil had %u inst to go\n",
                                rtcb->chunk->inst_count - inst_count);
                 }
                 

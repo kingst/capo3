@@ -86,6 +86,7 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
 static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb);
 static void sphere_chunk_end_locked(struct task_struct *tsk);
 
+
 /********************************* Helpers for usermode ***************************************/
 
 static int sphere_is_state(replay_sphere_t *sphere, uint32_t state) {
@@ -223,16 +224,6 @@ static uint32_t sphere_next_thread_id(replay_sphere_t *sphere) {
 
 /********************************** Helpers for recording *************************************/
 
-#ifdef CONFIG_MRR
-static int cut_chunk_on_syscall(struct pt_regs *regs) {
-        switch(regs_syscallno(regs)) {
-        case __NR_futex:
-                return 1;
-        }
-
-        return 0;
-}
-#endif
 
 static int record_header_locked(replay_sphere_t *sphere, replay_event_t event, 
                                 uint32_t thread_id, struct pt_regs *regs) {
@@ -289,7 +280,6 @@ static int record_buffer_locked(replay_sphere_t *sphere, uint64_t to_addr,
 
 static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         int len, ret;
-        int result = 0;
 
         // if someone is in the middle of processing a copy to
         // user buffer, just exit immediately because the data on the fifo
@@ -310,33 +300,16 @@ static int is_next_log(replay_sphere_t *sphere, uint32_t thread_id) {
         }
 
         if(sphere->header != NULL) {
-                my_magic_message_int("next log entry is tid", sphere->header->thread_id);
-                my_magic_message_int("next log entry is type", sphere->header->type);
-                result = sphere->header->thread_id == thread_id;
+                return (sphere->header->thread_id == thread_id);
         }
 
-        // for test
-        len = kfifo_len(&sphere->fifo);
-        if(len >= sizeof(replay_header_t)) {
-            replay_header_t *temp = kmalloc(sizeof(replay_header_t), GFP_KERNEL);
-            memset(temp, 0, sizeof(replay_header_t));
-            ret = kfifo_out_peek(&sphere->fifo, temp, sizeof(replay_header_t));
-            if(ret != sizeof(replay_header_t)) BUG();
-            my_magic_message_int("next-to-next log entry is tid", temp->thread_id);
-            my_magic_message_int("next-to-next log entry is type", temp->type);
-            kfree(temp);
-        } else {
-            my_magic_message("not enough data in kfifo");
-        }
-                
-        return result;
+        return 0;
 }
 
 static replay_header_t *replay_wait_for_log(replay_sphere_t *sphere, uint32_t thread_id) {
         replay_header_t *header;
 
         while(!is_next_log(sphere, thread_id)) {
-                my_magic_message_int("sleeping for next log entry", thread_id);
                 cond_wait(&sphere->next_record_cond, &sphere->mutex);
         }
 
@@ -434,8 +407,6 @@ static int reexecute_syscall(struct pt_regs *regs) {
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
 
         case __NR_clone: case __NR_fork:
-
-        //case __NR_futex:
 
         case __NR_rt_sigaction: case __NR_rt_sigprocmask: case __NR_rt_sigreturn:
         case __NR_sigaltstack:
@@ -611,6 +582,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 my_magic_message_int("log entry type is", event);
                 if ((NULL != current->rtcb) && (NULL != current->rtcb->chunk))
                     my_magic_message_int("remaining inst_count is", current->rtcb->chunk->inst_count);
+
                 header = replay_wait_for_log(sphere, thread_id);
                 my_magic_message_int("got the next log entry", thread_id);
                 my_magic_message_int("entry type is", header->type);
@@ -635,7 +607,7 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                         // be different whey replaying
                         replay_copy_to_user(sphere, ((regs_syscallno(regs) == __NR_getpid) || (regs_syscallno(regs) == __NR_clone)) 
                                                     && (event == syscall_exit_event));
-                        if(PRINT_DEBUG) printk("done replaying copy_to_user\n");
+                        if (PRINT_DEBUG) printk("done replaying copy_to_user\n");
                 } else if(header->type == signal_event) {
                         exit_loop = 0;
                         if (PRINT_DEBUG) printk(KERN_CRIT "sending signal %ld\n", regs_syscallno(&header->regs));
@@ -674,7 +646,7 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
         uint32_t idx, i, me;
 
         BUG_ON(rtcb->chunk != NULL);
-        if (PRINT_DEBUG) printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
+        if(PRINT_DEBUG) printk(KERN_CRIT "starting chunk begin tid = %u\n", rtcb->thread_id);
 
         chunk = demux_chunk_begin(sphere->demux, rtcb->thread_id, &sphere->mutex);
         BUG_ON(chunk->thread_id != rtcb->thread_id);

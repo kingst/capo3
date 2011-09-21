@@ -169,6 +169,7 @@ struct thread_info {
 
 #endif /* CONFIG_RECORD_REPLAY */
 
+
 /* work to do on any return to user space */
 #define _TIF_ALLWORK_MASK						\
 	((0x0000FFFF & ~_TIF_SECCOMP) | _TIF_SYSCALL_TRACEPOINT)
