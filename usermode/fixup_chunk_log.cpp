@@ -76,8 +76,16 @@ int main(int argc, char *argv[]) {
                 return 0;
         }
 
+        // read number of processors
+        int num_procs = read_num_procs(STDIN_FILENO);
+        if (num_procs > NUM_CHUNK_PROC) {
+                fprintf(stderr, "chunks log contains more than %d processors\n", NUM_CHUNK_PROC);
+                return 0;
+        }
+
+        // read chunks
         chunk = new chunk_t;
-        while(read_chunk(STDIN_FILENO, chunk)) {
+        while(read_chunk(STDIN_FILENO, chunk, num_procs)) {
                 fprintf(stderr,"processor id = %u\n", chunk->processor_id);
                 fprintf(stderr,"thread id    = %u\n", chunk->thread_id);
                 fprintf(stderr,"inst count   = %u\n", chunk->inst_count);
