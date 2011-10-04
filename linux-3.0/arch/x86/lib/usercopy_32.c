@@ -14,6 +14,15 @@
 #include <asm/uaccess.h>
 #include <asm/mmx.h>
 
+#ifdef CONFIG_RECORD_REPLAY
+#include <asm/replay.h>
+rr_copy_to_user_cb_t rr_copy_to_user_cb = NULL;
+void set_rr_copy_to_user_cb(rr_copy_to_user_cb_t cb) {
+    rr_copy_to_user_cb = cb;
+}
+EXPORT_SYMBOL_GPL(set_rr_copy_to_user_cb);
+#endif
+
 #ifdef CONFIG_X86_INTEL_USERCOPY
 /*
  * Alignment at which movsl is preferred for bulk memory copies.
@@ -714,7 +723,7 @@ do {									\
 		: "memory");						\
 } while (0)
 
-unsigned long __copy_to_user_ll(void __user *to, const void *from,
+static unsigned long __copy_to_user_ll_orig(void __user *to, const void *from,
 				unsigned long n)
 {
 #ifndef CONFIG_X86_WP_WORKS_OK
@@ -780,6 +789,24 @@ survive:
 		n = __copy_user_intel(to, from, n);
 	return n;
 }
+
+
+unsigned long __copy_to_user_ll(void __user *to, const void *from,
+                                unsigned long n)
+{
+
+        int ret = __copy_to_user_ll_orig(to, from, n);
+
+#ifdef CONFIG_RECORD_REPLAY
+        if((ret == 0) && test_thread_flag(TIF_RECORD_REPLAY) &&
+           (NULL != rr_copy_to_user_cb)) {
+                rr_copy_to_user_cb((unsigned long) to, from, n);
+        }
+#endif
+
+        return ret;
+}
+
 EXPORT_SYMBOL(__copy_to_user_ll);
 
 unsigned long __copy_from_user_ll(void *to, const void __user *from,

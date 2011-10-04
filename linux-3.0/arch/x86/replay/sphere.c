@@ -394,11 +394,14 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
 #ifdef CONFIG_X86_64
         case __NR_arch_prctl:
+#else
+        case __NR_mmap2: 
 #endif
         case __NR_execve: case __NR_brk:
-        case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
+        case __NR_exit_group: case __NR_munmap: case __NR_mmap:
         case __NR_mprotect: case __NR_exit: case __NR_mlock:
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
+        case __NR_set_thread_area:
 
         case __NR_clone: case __NR_fork:
 
