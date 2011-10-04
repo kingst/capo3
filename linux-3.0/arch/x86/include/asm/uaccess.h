@@ -253,7 +253,8 @@ extern void __put_user_8(void);
 
 #endif
 
-#ifdef CONFIG_X86_WP_WORKS_OK
+#if defined CONFIG_X86_WP_WORKS_OK && (defined CONFIG_X86_64 || !defined CONFIG_RECORD_REPLAY)
+
 
 /**
  * put_user: - Write a simple value into user space.
@@ -363,6 +364,7 @@ do {									\
 		__ret_pu = -EFAULT;				\
 	__ret_pu;						\
 })
+
 #endif
 
 #ifdef CONFIG_X86_32
@@ -557,7 +559,7 @@ struct __large_struct { unsigned long buf[100]; };
 	(x) = (__force __typeof__(*(ptr)))__gue_val;			\
 } while (0)
 
-#ifdef CONFIG_X86_WP_WORKS_OK
+#if defined CONFIG_X86_WP_WORKS_OK && !defined CONFIG_RECORD_REPLAY
 
 #define put_user_try		uaccess_try
 #define put_user_catch(err)	uaccess_catch(err)

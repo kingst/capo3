@@ -129,7 +129,8 @@ int main(int argc, char *argv[]) {
         // at the beginning of the stream until we get the return from the first execve
         while((ret = read(STDIN_FILENO, &header, sizeof(header))) > 0) {
                 assert(ret == sizeof(header));
-                if((header.type == syscall_exit_event) && (header.regs.orig_rax == __NR_execve)) {
+                if((header.type == syscall_exit_event) && 
+                   (regs_syscallno(&header.regs) == __NR_execve)) {
                         write_bytes(replayFd, &header, sizeof(header));
                         break;
                 } else if(header.type == copy_to_user_event) {
@@ -139,7 +140,8 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        assert((header.type == syscall_exit_event) && (header.regs.orig_rax == __NR_execve));
+        assert((header.type == syscall_exit_event) && 
+               (regs_syscallno(&header.regs) == __NR_execve));
 
         while((ret = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
                 write_bytes(replayFd, buf, ret);

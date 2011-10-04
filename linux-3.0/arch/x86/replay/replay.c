@@ -69,7 +69,7 @@
 #define NUM_REPLAY_MINOR 4
 #define REPLAY_VERSION	"0.3"
 
-#define PRINT_DEBUG 0
+#define PRINT_DEBUG 1
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;

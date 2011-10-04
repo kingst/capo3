@@ -326,7 +326,6 @@ config X86_EXTENDED_PLATFORM
 	  generic distribution kernel, say Y here - otherwise say N.
 endif
 
-if X86_64
 config RECORD_REPLAY
        bool "Support for deterministic recording and replay"
        default n
@@ -347,6 +346,7 @@ config RR_CHUNKING_PERFCOUNT
        ---help---
          Support for chunk replay using performance counters.
 
+if X86_64
 config X86_EXTENDED_PLATFORM
 	bool "Support for extended (non-PC) x86 platforms"
 	default y

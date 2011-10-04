@@ -47,10 +47,7 @@ static inline unsigned long regs_sixth(struct pt_regs *regs) {return regs->r9;}
 static inline unsigned long regs_ip(struct pt_regs *regs) {return regs->ip;}
 static inline unsigned long regs_sp(struct pt_regs *regs) {return regs->sp;}
 
-//#elif CONFIG_X86_32
-#elif 0
-
-#error "support for 32 bit not working yet"
+#elif defined CONFIG_X86_32
 
 static inline unsigned long regs_return(struct pt_regs *regs) {return regs->ax;}
 static inline void set_regs_return(struct pt_regs *regs, unsigned long val) {regs->ax = val;}

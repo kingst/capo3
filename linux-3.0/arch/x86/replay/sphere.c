@@ -72,7 +72,7 @@
 #include <asm/debugreg.h>
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
-#define PRINT_DEBUG 0
+#define PRINT_DEBUG 1
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
@@ -394,11 +394,14 @@ static int reexecute_syscall(struct pt_regs *regs) {
 
 #ifdef CONFIG_X86_64
         case __NR_arch_prctl:
+#else
+        case __NR_mmap2: 
 #endif
         case __NR_execve: case __NR_brk:
-        case __NR_exit_group: case __NR_munmap: case __NR_mmap: 
+        case __NR_exit_group: case __NR_munmap: case __NR_mmap:
         case __NR_mprotect: case __NR_exit: case __NR_mlock:
         case __NR_munlock: case __NR_mlockall: case __NR_munlockall:
+        case __NR_set_thread_area:
 
         case __NR_clone: case __NR_fork:
 
@@ -437,10 +440,10 @@ static void check_regs(struct pt_regs *regs, struct pt_regs *stored_regs) {
         check_reg("return", regs_return(regs), regs_return(stored_regs));
         check_reg("first", regs_first(regs), regs_first(stored_regs));
         check_reg("second", regs_second(regs), regs_second(stored_regs));
-        //check_reg("third", regs_third(regs), regs_third(stored_regs));
-        //check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
-        //check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
-        //check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
+        check_reg("third", regs_third(regs), regs_third(stored_regs));
+        check_reg("fourth", regs_fourth(regs), regs_fourth(stored_regs));
+        check_reg("fifth", regs_fifth(regs), regs_fifth(stored_regs));
+        check_reg("sixth", regs_sixth(regs), regs_sixth(stored_regs));
 }
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
