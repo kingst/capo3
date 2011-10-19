@@ -245,18 +245,32 @@ int read_chunk(int chunkFd, chunk_t *chunk, int num_procs) {
         int ret;
 
         memset(chunk, 0, sizeof(*chunk));
-        while((ret = read(chunkFd, &c, sizeof(c))) == 1) {
-                if(c == 0xff) {
-                        fillSuccPred(chunkFd, chunk, num_procs);
-                } else {
-                        chunk->processor_id = c;
-                        chunk->thread_id = readUChar(chunkFd);
-                        chunk->inst_count = readUInt(chunkFd);
-                        chunk->ip = readULong(chunkFd);
-                        fillSuccPred(chunkFd, chunk, num_procs);
+        
+        if (num_procs > 1) {
+                // parallel log
+                while((ret = read(chunkFd, &c, sizeof(c))) == 1) {
+                        if(c == 0xff) {
+                                assert(num_procs > 1);
+                                fillSuccPred(chunkFd, chunk, num_procs);
+                        } else {
+                                chunk->processor_id = c;
+                                chunk->thread_id = readUChar(chunkFd);
+                                chunk->inst_count = readUInt(chunkFd);
+                                chunk->ip = readULong(chunkFd);
+                                fillSuccPred(chunkFd, chunk, num_procs);
 
-                        return 1;
+                                return 1;
+                        }
                 }
+        }
+        else if ((ret = read(chunkFd, &c, sizeof(c))) == 1) {            
+                // serial log
+                chunk->processor_id = 0;
+                chunk->thread_id = c;
+                chunk->inst_count = readUInt(chunkFd);
+                chunk->ip = readULong(chunkFd);
+
+                return 1;
         }
 
         return 0;

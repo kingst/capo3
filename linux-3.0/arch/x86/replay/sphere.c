@@ -242,6 +242,12 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
                 }
         }
 
+#ifdef CONFIG_MRR
+        // cut the chunk on all recorded events, if any,
+        // to avoid deadlocks between chunks log and input log
+        mrr_terminate_chunk();
+#endif
+
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
         if(ret != sizeof(type)) return -1;
         ret = kfifo_in(&sphere->fifo, &thread_id, sizeof(thread_id));
@@ -924,6 +930,7 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
         int ret;
 
         mutex_lock(&sphere->mutex);
+
         ret = record_header_locked(sphere, event, thread_id, regs);
 
 #ifdef CONFIG_MRR
@@ -935,12 +942,9 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
         } else if(current->rtcb->needs_chunk_start) {
                 current->rtcb->needs_chunk_start = 0;
                 mrr_switch_to_record(current);
-        } else if (syscall_enter_event == event) {
-                // cut the chunk on all recorded events
-                // to prohibit deadlocks between chunks log and input log
-                mrr_terminate_chunk();
         }
 #endif
+
         mutex_unlock(&sphere->mutex);
 
         if(ret)
@@ -952,8 +956,7 @@ void record_copy_to_user(replay_sphere_t *sphere, unsigned long to_addr, void *b
         struct task_struct *tsk = current;
         struct pt_regs *regs = task_pt_regs(tsk);
 
-        while(mutex_trylock(&sphere->mutex) == 0)
-                ;
+        while(mutex_trylock(&sphere->mutex) == 0) ;
 
         ret = record_header_locked(sphere, copy_to_user_event,
                                    current->rtcb->thread_id, regs);
