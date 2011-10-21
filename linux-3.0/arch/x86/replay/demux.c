@@ -75,6 +75,7 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
+#include <asm/mrr/simics_if.h>
 
 #define PRINT_DEBUG 0
 #define DEMUX_BUF_SIZE (1024*4096)
@@ -217,9 +218,11 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         // to be at the beginning of the dchunk
         BUG_ON(chunk != (chunk_t *) dchunk);
 
+        my_magic_message_int("waiting for next chunk entry", thread_id);
         while(!has_chunk(dm, thread_id, dchunk)) {
                 cond_wait(&dm->next_chunk_cond, mutex);
         }
+        my_magic_message_int_2("got the next chunk entry", thread_id, chunk->inst_count);
 
         return chunk;
 }

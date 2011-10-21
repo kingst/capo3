@@ -146,7 +146,7 @@ void mrr_switch_from_record(struct task_struct *tsk) {
  * This function does not sleep.
  */
 void mrr_switch_from_replay(struct task_struct *tsk) {
-    my_magic_message_int("switching from rthread", tsk->rtcb->thread_id);
+    //my_magic_message_int("switching from rthread", tsk->rtcb->thread_id);
     // save the remaining inst count
     mrr_virtualize_chunk_size(tsk);
     my_magic_app_out();
@@ -168,7 +168,7 @@ void mrr_switch_to_record(struct task_struct *tsk) {
  * this function may sleep.
  */
 void mrr_switch_to_replay(struct task_struct *tsk) {
-    my_magic_message_int("switching to rthread", tsk->rtcb->thread_id);
+    //my_magic_message_int("switching to rthread", tsk->rtcb->thread_id);
     my_magic_app_in();
     prepare_mrr_replay(tsk);
 }

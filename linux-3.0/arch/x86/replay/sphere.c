@@ -242,12 +242,6 @@ static int record_header_locked(replay_sphere_t *sphere, replay_event_t event,
                 }
         }
 
-#ifdef CONFIG_MRR
-        // cut the chunk on all recorded events, if any,
-        // to avoid deadlocks between chunks log and input log
-        mrr_terminate_chunk();
-#endif
-
         ret = kfifo_in(&sphere->fifo, &type, sizeof(type));
         if(ret != sizeof(type)) return -1;
         ret = kfifo_in(&sphere->fifo, &thread_id, sizeof(thread_id));
@@ -584,14 +578,12 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 }
         #endif
 
-                my_magic_message_int("waiting for next log entry", thread_id);
-                my_magic_message_int("log entry type is", event);
+                my_magic_message_int_2("waiting for next log entry", thread_id, event);
                 if ((NULL != current->rtcb) && (NULL != current->rtcb->chunk))
                     my_magic_message_int("remaining inst_count is", current->rtcb->chunk->inst_count);
 
                 header = replay_wait_for_log(sphere, thread_id);
-                my_magic_message_int("got the next log entry", thread_id);
-                my_magic_message_int("entry type is", header->type);
+                my_magic_message_int_2("got the next log entry", thread_id, header->type);
 
                 if(header == NULL)
                         BUG();
@@ -633,7 +625,6 @@ static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, u
                 kfree(header);
                 header = NULL;
 
-                my_magic_message_int("signaling next_record_cond", thread_id);
                 cond_broadcast(&sphere->next_record_cond);
 
         } while(!exit_loop);
@@ -669,14 +660,14 @@ static void sphere_chunk_begin_locked(replay_sphere_t *sphere, rtcb_t *rtcb) {
 
         mutex_unlock(&sphere->mutex);
 
-        my_magic_message_int("before semaphores", rtcb->thread_id);
+        my_magic_message_int("waiting for semaphores", rtcb->thread_id);
         // now wait on tokens from predecessor chunks
         for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
                 for(i = 0; i < chunk->pred_vec[idx]; i++) {
                         down(&(sphere->proc_sem[idx][me]));
                 }
         }
-        my_magic_message_int("after semaphores", rtcb->thread_id);
+        my_magic_message_int("got the semaphores", rtcb->thread_id);
 
         mutex_lock(&sphere->mutex);
         rtcb->chunk = chunk;
@@ -942,7 +933,11 @@ void record_header(replay_sphere_t *sphere, replay_event_t event, uint32_t threa
         } else if(current->rtcb->needs_chunk_start) {
                 current->rtcb->needs_chunk_start = 0;
                 mrr_switch_to_record(current);
-        }
+        } else if (syscall_enter_event == event) {
+                // cut the chunk on all recorded events
+                // to prohibit deadlocks between chunks log and input log
+                mrr_terminate_chunk();
+         }
 #endif
 
         mutex_unlock(&sphere->mutex);
