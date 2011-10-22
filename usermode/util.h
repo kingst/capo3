@@ -35,6 +35,11 @@ struct pt_regs {
     /* top of stack page */
 };
 
+static inline unsigned long regs_syscallno(struct pt_regs *regs) {return regs->orig_rax;}
+static inline unsigned long regs_return(struct pt_regs *regs) {return regs->rax;}
+static inline unsigned long regs_first(struct pt_regs *regs) {return regs->rdi;}
+static inline unsigned long regs_ip(struct pt_regs *regs) {return regs->rip;}
+
 #elif __i386__
 
 struct pt_regs {
@@ -56,6 +61,11 @@ struct pt_regs {
 	long esp;
 	int  xss;
 };
+
+static inline unsigned long regs_syscallno(struct pt_regs *regs) {return regs->orig_eax;}
+static inline unsigned long regs_return(struct pt_regs *regs) {return regs->eax;}
+static inline unsigned long regs_first(struct pt_regs *regs) {return regs->ebx;}
+static inline unsigned long regs_ip(struct pt_regs *regs) {return regs->eip;}
 
 #else
 

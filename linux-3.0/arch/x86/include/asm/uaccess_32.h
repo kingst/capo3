@@ -1,6 +1,10 @@
 #ifndef _ASM_X86_UACCESS_32_H
 #define _ASM_X86_UACCESS_32_H
 
+#ifdef CONFIG_RECORD_REPLAY
+extern void (*rr_copy_to_user_cb)(unsigned long to_addr, void *buf, int len);
+#endif
+
 /*
  * User space memory access functions
  */

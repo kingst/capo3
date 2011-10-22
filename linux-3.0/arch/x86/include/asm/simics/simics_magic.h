@@ -1,7 +1,7 @@
-#ifndef _ASM_X86_SIMICS_IF_H
-#define _ASM_X86_SIMICS_IF_H
+#ifndef _ASM_X86_SIMICSHWSW_IF_H
+#define _ASM_X86_SIMICSHWSW_IF_H
 
-#include "mrrhw_if.h"
+#include "simics_if.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // magic call stubs
@@ -104,4 +104,4 @@ inline static void *my_magic_4(void *a, void *c, void *d, void *s) {
 #define my_magic_app_out()                      my_magic((void*)(unsigned long)MRR_MARKER_APP_OUT)
 #define my_magic_stats_reset()                  my_magic((void*)(unsigned long)MRR_MARKER_STATS_RESET)
 
-#endif /* _ASM_X86_SIMICS_IF_H */
+#endif /* _ASM_X86_SIMICSHWSW_IF_H */

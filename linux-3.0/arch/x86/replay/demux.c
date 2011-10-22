@@ -75,7 +75,7 @@
 #include <trace/events/syscalls.h>
 
 #include <asm/replay.h>
-#include <asm/mrr/simics_if.h>
+#include <asm/simics/simics_magic.h>
 
 #define PRINT_DEBUG 0
 #define DEMUX_BUF_SIZE (1024*4096)

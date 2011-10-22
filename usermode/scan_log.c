@@ -75,16 +75,18 @@ int main(int argc, char *argv[]) {
                 printf("%u ", header.thread_id);
                 if(header.type == syscall_enter_event) {
                         printf("syscall_enter_event, syscall = %ld arg1 = 0x%08lx ip = 0x%08lx\n",
-                               header.regs.orig_rax, header.regs.rdi, header.regs.rip);
+                               regs_syscallno(&header.regs), 
+                               regs_first(&header.regs), 
+                               regs_ip(&header.regs));
                 } else if(header.type == syscall_exit_event) {
                         printf("syscall_exit_event, syscall = %ld ret = %ld\n",
-                               header.regs.orig_rax, header.regs.rax);
+                               regs_syscallno(&header.regs), regs_return(&header.regs));
                 } else if(header.type == thread_create_event) {
                         printf("thread_create_event\n");
                 } else if(header.type == thread_exit_event) {
                         printf("thread_exit_event\n");
                 } else if(header.type == instruction_event) {
-                        printf("instruction_event ip = 0x%08lx\n", header.regs.rip);
+                        printf("instruction_event ip = 0x%08lx\n", regs_ip(&header.regs));
                 } else if(header.type == execve_event) {
                         printf("execve_event\n");
                         e = readExecveData();

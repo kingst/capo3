@@ -65,15 +65,16 @@
 
 #include <asm/replay.h>
 #include <asm/capo_perfct.h>
+
+#include <asm/simics/simics_magic.h>
 #ifdef CONFIG_MRR
-#include <asm/mrr/simics_if.h>
 #include "mrr_if.h"
 #endif
 
 #define NUM_REPLAY_MINOR 4
 #define REPLAY_VERSION	"0.3"
 
-#define PRINT_DEBUG 0
+#define PRINT_DEBUG 1
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;

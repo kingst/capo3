@@ -1417,6 +1417,30 @@ ENTRY(async_page_fault)
 END(async_page_fault)
 #endif
 
+#ifdef CONFIG_MRR
+
+ENTRY(mrr_full)
+	RING0_INT_FRAME
+	pushl $0
+	CFI_ADJUST_CFA_OFFSET 4
+	pushl $do_mrr_full
+	CFI_ADJUST_CFA_OFFSET 4
+	jmp error_code
+	CFI_ENDPROC
+END(mrr_full)
+
+ENTRY(mrr_chunk_done)
+	RING0_INT_FRAME
+	pushl $0
+	CFI_ADJUST_CFA_OFFSET 4
+	pushl $do_mrr_chunk_done
+	CFI_ADJUST_CFA_OFFSET 4
+	jmp error_code
+	CFI_ENDPROC
+END(mrr_full)
+
+#endif /* CONFIG_MRR */
+
 /*
  * End of kprobes section
  */

@@ -2,7 +2,7 @@
 #include <linux/ptrace.h>
 #include <linux/kfifo.h>
 #include <asm/replay.h>
-#include <asm/mrr/simics_if.h>
+#include <asm/simics/simics_magic.h>
 #include "mrr_if.h"
 
 #define MSG_PREFIX "KernelMrr: "
