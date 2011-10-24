@@ -77,7 +77,7 @@
 #endif
 
 #define LOG_BUFFER_SIZE (8*1024*1024)
-#define PRINT_DEBUG 1
+#define PRINT_DEBUG 0
 
 static void replay_event_locked(replay_sphere_t *sphere, replay_event_t event, uint32_t thread_id,
                                 struct pt_regs *regs);
