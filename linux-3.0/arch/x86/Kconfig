@@ -2177,6 +2177,21 @@ config SIMICS
        ---help---
          Support for Simics magic calls.
 
+config SIMICS_HEARTBEAT
+       bool "Enable heart-beat messages in the Simics console"
+       depends on SIMICS
+       default n
+       ---help---
+         Enable heart-beat messages in the Simics console.
+
+config SIMICS_MESSAGE
+       bool "Enable kernel messages in the Simics console"
+       depends on SIMICS_HEARTBEAT
+       default n
+       ---help---
+         Enable kernel messages in the Simics console.
+
+
 endmenu
 
 

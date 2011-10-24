@@ -8,6 +8,7 @@ obj-$(CONFIG_XEN) += xen/
 obj-$(CONFIG_LGUEST_GUEST) += lguest/
 
 obj-$(CONFIG_RECORD_REPLAY) += replay/
+obj-$(CONFIG_MRR)   += mrr/
 
 obj-y += kernel/
 obj-y += mm/

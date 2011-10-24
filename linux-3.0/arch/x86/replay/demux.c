@@ -222,7 +222,7 @@ chunk_t *demux_chunk_begin(demux_t *dm, uint32_t thread_id, struct mutex *mutex)
         while(!has_chunk(dm, thread_id, dchunk)) {
                 cond_wait(&dm->next_chunk_cond, mutex);
         }
-        my_magic_message_int_2("got the next chunk entry", thread_id, chunk->inst_count);
+        my_magic_heartbeat_int_2("got the next chunk entry", thread_id, chunk->inst_count);
 
         return chunk;
 }
