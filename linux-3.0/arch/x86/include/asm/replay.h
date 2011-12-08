@@ -133,6 +133,10 @@ typedef struct replay_thread_control_block {
         struct perf_event *pevent;
         unsigned char saved_inst;
 #endif
+#ifdef CONFIG_MRR
+        // TODO: change this later
+        char chunk_size_buffer[1024];
+#endif
 } rtcb_t;
 
 

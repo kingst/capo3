@@ -89,7 +89,8 @@ struct execve_data {
 
 struct execve_data *readExecveData(void);
 char *readBuffer(void);
-int read_chunk(int chunkFd, chunk_t *chunk);
+int read_num_procs(int chunkFd);
+int read_chunk(int chunkFd, chunk_t *chunk, int num_procs);
 void write_bytes(int fd, void *tbuf, int len);
 
 #endif

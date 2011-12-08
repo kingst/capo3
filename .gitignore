@@ -16,5 +16,7 @@ usermode/scan_chunk_log
 disk_images/rootfs.ext3
 disk_images/rootfs.i386.ext3
 disk_images/ubuntu-10.04-x86_64.qcow2
+qemu-kernel-build
+simics-kernel-build
 buildroot-2011.05.*
 

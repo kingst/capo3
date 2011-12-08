@@ -326,26 +326,6 @@ config X86_EXTENDED_PLATFORM
 	  generic distribution kernel, say Y here - otherwise say N.
 endif
 
-config RECORD_REPLAY
-       bool "Support for deterministic recording and replay"
-       default n
-       ---help---
-         Support for deterministic recording and replay.
-
-config RECORD_REPLAY_STATIC
-       bool "Should RR module be linked in statically?"
-       default y
-       depends on RECORD_REPLAY
-       ---help---
-         Should RR module be linked in statically?
-
-config RR_CHUNKING_PERFCOUNT
-       bool "Support for chunk replay using performance counters"
-       default n
-       depends on RECORD_REPLAY
-       ---help---
-         Support for chunk replay using performance counters.
-
 if X86_64
 config X86_EXTENDED_PLATFORM
 	bool "Support for extended (non-PC) x86 platforms"
@@ -2157,6 +2137,60 @@ config KEYS_COMPAT
 	bool
 	depends on COMPAT && KEYS
 	default y
+
+endmenu
+
+
+menu "Record/Replay support"
+
+config RECORD_REPLAY
+       bool "Support for deterministic recording and replay"
+       default n
+       depends on X86
+       ---help---
+         Support for deterministic recording and replay.
+
+config RECORD_REPLAY_STATIC
+       bool "Should RR module be linked in statically?"
+       default y
+       depends on RECORD_REPLAY
+       ---help---
+         Should RR module be linked in statically?
+
+config RR_CHUNKING_PERFCOUNT
+       bool "Support for chunk replay using performance counters"
+       default n
+       depends on RECORD_REPLAY
+       ---help---
+         Support for chunk replay using performance counters.
+
+config MRR
+       bool "Support for memory interleaving record/replay using MRR hardware"
+       default n
+       depends on RECORD_REPLAY
+       ---help---
+         Support for memory interleaving recording.
+
+config SIMICS
+       bool "Support for Simics magic calls"
+       default n
+       ---help---
+         Support for Simics magic calls.
+
+config SIMICS_HEARTBEAT
+       bool "Enable heart-beat messages in the Simics console"
+       depends on SIMICS
+       default n
+       ---help---
+         Enable heart-beat messages in the Simics console.
+
+config SIMICS_MESSAGE
+       bool "Enable kernel messages in the Simics console"
+       depends on SIMICS_HEARTBEAT
+       default n
+       ---help---
+         Enable kernel messages in the Simics console.
+
 
 endmenu
 

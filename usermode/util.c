@@ -49,6 +49,10 @@
 #include <assert.h>
 #include <string.h>
 
+#ifdef CONFIG_SIMICS
+#include "simics_if.h"
+#endif
+
 void write_bytes(int fd, void *tbuf, int len) {
         int ret;
         int bytesWritten = 0;
@@ -93,6 +97,10 @@ pid_t startChild(int replayFd, char *argv[], char *envp[], start_t type) {
                 } else {
                         assert(0);
                 }
+
+        #ifdef CONFIG_SIMICS
+                my_magic_stats_reset();
+        #endif
                 execve(argv[0], argv, envp);
                 assert(0);
         }
@@ -202,41 +210,72 @@ static unsigned long readULong(int fd) {
         return c;
 }
 
-static void fillSuccPred(chunk_t *chunk, unsigned char succ, unsigned char pred) {
+static void fillSuccPred(int chunkFd, chunk_t *chunk, int num_procs) {
         int idx;
-        for(idx = 0; idx < NUM_CHUNK_PROC; idx++) {
-                if(succ & (1<<idx)) {
+        unsigned char buf[2*NUM_CHUNK_PROC];
+        int bv_size = (2 * num_procs + 7) >> 3;
+
+        // read succ/pred vectors
+        for (idx = 0; idx < bv_size; idx++) {
+                buf[idx] = readUChar(chunkFd);
+        }
+
+        // unpack succ vector
+        for (idx = 0; idx < num_procs; idx++) {
+                int byte_index = idx >> 3;
+                int bit_index = idx & 0x7;
+                if (buf[byte_index] & (1 << bit_index)) {
                         chunk->succ_vec[idx]++;
                 }
-                if(pred & (1<<idx)) {
+        }
+
+        // unpack pred vector
+        for (idx = 0; idx < num_procs; idx++) {
+                int byte_index = (idx+num_procs) >> 3;
+                int bit_index = (idx+num_procs) & 0x7;
+                if (buf[byte_index] & (1 << bit_index)) {
                         chunk->pred_vec[idx]++;
                 }
-        }
+        } 
 }
 
 
-int read_chunk(int chunkFd, chunk_t *chunk) {
-        unsigned char c, succ, pred;
+int read_chunk(int chunkFd, chunk_t *chunk, int num_procs) {
+        unsigned char c;
         int ret;
 
         memset(chunk, 0, sizeof(*chunk));
-        while((ret = read(chunkFd, &c, sizeof(c))) == 1) {
-                if(c == 0xff) {
-                        succ = readUChar(chunkFd);
-                        pred = readUChar(chunkFd);
-                        fillSuccPred(chunk, succ, pred);
-                } else {
-                        chunk->processor_id = c;
-                        chunk->thread_id = readUChar(chunkFd);
-                        chunk->inst_count = readUInt(chunkFd);
-                        chunk->ip = readULong(chunkFd);
-                        succ = readUChar(chunkFd);
-                        pred = readUChar(chunkFd);
-                        fillSuccPred(chunk, succ, pred);
+        
+        if (num_procs > 1) {
+                // parallel log
+                while((ret = read(chunkFd, &c, sizeof(c))) == 1) {
+                        if(c == 0xff) {
+                                assert(num_procs > 1);
+                                fillSuccPred(chunkFd, chunk, num_procs);
+                        } else {
+                                chunk->processor_id = c;
+                                chunk->thread_id = readUChar(chunkFd);
+                                chunk->inst_count = readUInt(chunkFd);
+                                chunk->ip = readULong(chunkFd);
+                                fillSuccPred(chunkFd, chunk, num_procs);
 
-                        return 1;
+                                return 1;
+                        }
                 }
+        }
+        else if ((ret = read(chunkFd, &c, sizeof(c))) == 1) {            
+                // serial log
+                chunk->processor_id = 0;
+                chunk->thread_id = c;
+                chunk->inst_count = readUInt(chunkFd);
+                chunk->ip = readULong(chunkFd);
+
+                return 1;
         }
 
         return 0;
+}
+
+int read_num_procs(int chunkFd) {
+    return readUInt(chunkFd);
 }

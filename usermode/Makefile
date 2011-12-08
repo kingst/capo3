@@ -4,7 +4,7 @@ all: $(EXE)
 
 CC = gcc
 CPLUSPLUS = g++
-CFLAGS = -g -W -Wall
+CFLAGS = -g -W -Wall -DCONFIG_SIMICS
 LDFLAGS = -static
 
 SHARED_OBJS = util.o

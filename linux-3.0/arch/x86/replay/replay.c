@@ -66,10 +66,15 @@
 #include <asm/replay.h>
 #include <asm/capo_perfct.h>
 
+#include <asm/simics/simics_magic.h>
+#ifdef CONFIG_MRR
+#include "mrr_if.h"
+#endif
+
 #define NUM_REPLAY_MINOR 4
 #define REPLAY_VERSION	"0.3"
 
-#define PRINT_DEBUG 1
+#define PRINT_DEBUG 0
 
 static struct class *replay_class = NULL;
 static struct file_operations replay_fops;
@@ -291,6 +296,7 @@ static int rr_deliver_signal(int signr, struct pt_regs *regs) {
 
         if(signr < 0)
                 return signr;
+        if (PRINT_DEBUG) printk(KERN_CRIT "got signal %d", signr);
 
         switch(signr) {
                 case SIGTERM: 
@@ -376,6 +382,16 @@ static void rr_thread_exit(struct pt_regs *regs) {
         rtcb_t *rtcb = current->rtcb;
         sanity_check(current);
 
+#ifdef CONFIG_MRR
+        if (sphere_is_recording(rtcb->sphere)) {
+                mrr_switch_from_record(current);
+        } else if (sphere_is_chunk_replaying(rtcb->sphere)) {
+                mrr_switch_from_replay(current);
+                BUG_ON((NULL != rtcb->chunk) && (0 != rtcb->chunk->inst_count));
+        }
+        clear_thread_flag(TIF_MRR_CHUNKING);
+#endif
+
         if(sphere_is_chunk_replaying(rtcb->sphere) && (rtcb->chunk != NULL)) {
                 sphere_chunk_end(current);
         }
@@ -388,6 +404,19 @@ static void rr_thread_exit(struct pt_regs *regs) {
 }
 
 static void rr_switch_from(struct task_struct *prev_p) {
+
+#ifdef CONFIG_MRR
+        if (test_tsk_thread_flag(prev_p, TIF_RECORD_REPLAY)) {
+                BUG_ON(current != prev_p);
+                sanity_check(prev_p);
+                if (sphere_is_recording(prev_p->rtcb->sphere)) {
+                        mrr_switch_from_record(prev_p);
+                } else if (sphere_is_chunk_replaying(prev_p->rtcb->sphere)) {
+                        mrr_switch_from_replay(prev_p);
+                }
+        }
+#endif
+
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(prev_p->rtcb != NULL) {
                 long dr7;
@@ -405,6 +434,19 @@ static void rr_switch_from(struct task_struct *prev_p) {
 }
 
 static void rr_switch_to(struct task_struct *next_p) {
+
+#ifdef CONFIG_MRR
+        // prepare the mrr hw for the next thread, if necessary
+        if (test_tsk_thread_flag(next_p, TIF_RECORD_REPLAY)) {
+                BUG_ON(current != next_p);
+                sanity_check(next_p);
+                if (sphere_is_recording(next_p->rtcb->sphere)) {
+                        mrr_switch_to_record(next_p);
+                } else if (sphere_is_chunk_replaying(next_p->rtcb->sphere)) {
+                        mrr_switch_to_replay(next_p);
+                }
+        }
+#endif
 
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         if(next_p->rtcb != NULL) {
@@ -735,6 +777,10 @@ static int __init replay_init(void) {
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         set_rr_do_debug_cb(rr_do_debug);
 #endif
+#ifdef CONFIG_MRR
+        set_mrr_buffer_full_handler_cb(mrr_buffer_full_handler);
+        set_mrr_chunk_done_handler_cb(mrr_chunk_done_handler);
+#endif
 
     	return 0;
 }
@@ -755,6 +801,10 @@ static void __exit replay_exit(void) {
         set_rr_deliver_signal_cb(NULL);
 #ifdef CONFIG_RR_CHUNKING_PERFCOUNT
         set_rr_do_debug_cb(NULL);
+#endif
+#ifdef CONFIG_MRR
+        set_mrr_buffer_full_handler_cb(NULL);
+        set_mrr_chunk_done_handler_cb(NULL);
 #endif
 
         if(!IS_ERR(replay_class)) {

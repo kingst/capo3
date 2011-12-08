@@ -58,6 +58,7 @@ extern "C" {
 
 using namespace std;
 
+
 int main(int argc, char *argv[]) {
         chunk_t *chunk;
         int idx;
@@ -75,8 +76,16 @@ int main(int argc, char *argv[]) {
                 return 0;
         }
 
+        // read number of processors
+        int num_procs = read_num_procs(STDIN_FILENO);
+        if (num_procs > NUM_CHUNK_PROC) {
+                fprintf(stderr, "chunks log contains more than %d processors\n", NUM_CHUNK_PROC);
+                return 0;
+        }
+
+        // read chunks
         chunk = new chunk_t;
-        while(read_chunk(STDIN_FILENO, chunk)) {
+        while(read_chunk(STDIN_FILENO, chunk, num_procs)) {
                 fprintf(stderr,"processor id = %u\n", chunk->processor_id);
                 fprintf(stderr,"thread id    = %u\n", chunk->thread_id);
                 fprintf(stderr,"inst count   = %u\n", chunk->inst_count);
@@ -94,10 +103,6 @@ int main(int argc, char *argv[]) {
 
                 fprintf(stderr,"ip           = 0x%p\n", (void *) chunk->ip);
 
-                /*
-
-                */
-
                 chunk_list.insert(chunk_list.end(), chunk);
                 chunk = new chunk_t;
         }
@@ -109,8 +114,8 @@ int main(int argc, char *argv[]) {
         for(list_iter = chunk_list.begin(); list_iter != chunk_list.end(); list_iter++) {
                 chunk = *list_iter;
                 if(last_chunk.find(chunk->thread_id) != last_chunk.end()) {
-                        assert(chunk->ip != 0);
-                        assert(chunk->inst_count != 0);
+                        //assert(chunk->ip != 0);
+                        //assert(chunk->inst_count != 0);
                         assert(last_chunk[chunk->thread_id]->ip == 0);
                         assert(last_chunk[chunk->thread_id]->inst_count == 0);
                                 

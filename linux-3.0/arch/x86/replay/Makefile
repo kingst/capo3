@@ -12,3 +12,6 @@ ifdef CONFIG_RR_CHUNKING_PERFCOUNT
 rr-objs += capo_perfct.o
 endif
 
+ifdef CONFIG_MRR
+rr-objs += mrr_if.o
+endif

@@ -55,6 +55,10 @@
 #include <asm/irq_vectors.h>
 #include <asm/cpufeature.h>
 
+#ifdef CONFIG_MRR
+#include <asm/mrr/mrrhw_if.h>
+#endif
+
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
 #define AUDIT_ARCH_I386		(EM_386|__AUDIT_ARCH_LE)
@@ -335,6 +339,16 @@ check_userspace:
 	jb resume_kernel		# not returning to v8086 or userspace
 
 ENTRY(resume_userspace)
+#ifdef CONFIG_MRR
+    // chunking enabled?
+    // check the thread info flags to see if chunking 
+    // should be enabled. if yes, set the MRR flag in EFLAGS
+	movl TI_flags(%ebp), %ecx
+    and $_TIF_MRR_CHUNKING, %ecx
+    jz mrr_continue
+    orl $MRR_FLAG_MASK, PT_EFLAGS(%esp)
+mrr_continue:
+#endif
 	LOCKDEP_SYS_EXIT
  	DISABLE_INTERRUPTS(CLBR_ANY)	# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
@@ -1416,6 +1430,30 @@ ENTRY(async_page_fault)
 	CFI_ENDPROC
 END(async_page_fault)
 #endif
+
+#ifdef CONFIG_MRR
+
+ENTRY(mrr_full)
+	RING0_INT_FRAME
+	pushl $0
+	CFI_ADJUST_CFA_OFFSET 4
+	pushl $do_mrr_full
+	CFI_ADJUST_CFA_OFFSET 4
+	jmp error_code
+	CFI_ENDPROC
+END(mrr_full)
+
+ENTRY(mrr_chunk_done)
+	RING0_INT_FRAME
+	pushl $0
+	CFI_ADJUST_CFA_OFFSET 4
+	pushl $do_mrr_chunk_done
+	CFI_ADJUST_CFA_OFFSET 4
+	jmp error_code
+	CFI_ENDPROC
+END(mrr_full)
+
+#endif /* CONFIG_MRR */
 
 /*
  * End of kprobes section

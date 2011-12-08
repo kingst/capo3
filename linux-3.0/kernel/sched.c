@@ -4344,6 +4344,7 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
+
 	} else
 		raw_spin_unlock_irq(&rq->lock);
 
@@ -4358,6 +4359,7 @@ need_resched:
         rr_switch_to_cb(current);
     }
 #endif
+
 }
 EXPORT_SYMBOL(schedule);
 
